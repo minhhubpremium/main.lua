@@ -107,19 +107,17 @@ do
             return g
         end
 
+        -- ===== GIAO DIỆN LOADING KIỂU CÔNG NGHỆ (HUD / terminal) =====
+        local CY = Color3.fromRGB(70, 210, 255)
+        local MONO = Enum.Font.Code
+        local CW, CH = 560, 340
+
         local dim = Instance.new("Frame")
         dim.Size = UDim2.new(1, 0, 1, 0)
-        dim.BackgroundColor3 = Color3.new(0, 0, 0)
-        dim.BackgroundTransparency = 0
+        dim.BackgroundColor3 = Color3.fromRGB(3, 5, 10)
+        dim.BackgroundTransparency = 0.15
         dim.BorderSizePixel = 0
         dim.Parent = gui
-        do
-            local dg = Instance.new("UIGradient")
-            dg.Rotation = 90
-            dg.Transparency = NumberSequence.new({
-                NumberSequenceKeypoint.new(0, 0.2), NumberSequenceKeypoint.new(0.5, 0.45), NumberSequenceKeypoint.new(1, 0.2)})
-            dg.Parent = dim
-        end
 
         local blur
         pcall(function()
@@ -130,55 +128,49 @@ do
             Real:Create(blur, TweenInfo.new(0.6), {Size = 16}):Play()
         end)
 
-        -- hạt sáng nhỏ, mờ (không che nội dung)
         local particles = {}
         local prng = Random.new(os.time())
-        for i = 1, 18 do
+        for i = 1, 20 do
             local pf = Instance.new("Frame")
-            local sz = prng:NextInteger(2, 4)
-            pf.Size = UDim2.new(0, sz, 0, sz)
-            pf.BackgroundColor3 = i % 3 == 0 and ACCENT_L or ACCENT
-            pf.BackgroundTransparency = prng:NextNumber(0.65, 0.9)
+            pf.Size = UDim2.new(0, 2, 0, prng:NextInteger(6, 16))
+            pf.BackgroundColor3 = CY
+            pf.BackgroundTransparency = prng:NextNumber(0.7, 0.92)
             pf.BorderSizePixel = 0
             pf.Parent = gui
-            corner(pf, 3)
-            particles[i] = {f = pf, x = prng:NextNumber(), y = prng:NextNumber(), v = prng:NextNumber(0.02, 0.05), sw = prng:NextNumber(0.5, 2)}
+            particles[i] = {f = pf, x = prng:NextNumber(), y = prng:NextNumber(), v = prng:NextNumber(0.04, 0.12), sw = 0}
         end
 
-        -- viền sáng mềm quanh thẻ (nhiều lớp mờ dần, không còn đĩa tròn cứng)
         local glowLayers = {}
-        for i = 1, 5 do
+        for i = 1, 4 do
             local gl = Instance.new("Frame")
             gl.AnchorPoint = Vector2.new(0.5, 0.5)
             gl.Position = UDim2.new(0.5, 0, 0.5, 0)
-            gl.Size = UDim2.new(0, 500 + i * 22, 0, 300 + i * 22)
-            gl.BackgroundColor3 = ACCENT
-            gl.BackgroundTransparency = 0.9 + i * 0.019
+            gl.Size = UDim2.new(0, CW + i * 16, 0, CH + i * 16)
+            gl.BackgroundColor3 = CY
+            gl.BackgroundTransparency = 0.93 + i * 0.015
             gl.BorderSizePixel = 0
             gl.Parent = gui
-            corner(gl, 14 + i * 10)
+            corner(gl, 6 + i * 6)
             glowLayers[i] = gl
         end
 
         local card = Instance.new("Frame")
-        card.Size = UDim2.new(0, 500, 0, 300)
+        card.Size = UDim2.new(0, CW, 0, CH)
         card.AnchorPoint = Vector2.new(0.5, 0.5)
         card.Position = UDim2.new(0.5, 0, 0.5, 0)
-        card.BackgroundColor3 = Color3.new(1, 1, 1)
-        card.BackgroundTransparency = 0
+        card.BackgroundColor3 = Color3.fromRGB(6, 10, 18)
+        card.BackgroundTransparency = 0.04
         card.BorderSizePixel = 0
         card.ClipsDescendants = true
         card.Parent = gui
-        corner(card, 14)
+        corner(card, 6)
         local stroke = Instance.new("UIStroke")
         stroke.Color = Color3.new(1, 1, 1)
-        stroke.Thickness = 1.6
-        stroke.Transparency = 0
+        stroke.Thickness = 1.2
         stroke.Parent = card
-        gradient(stroke, ACCENT_L, Color3.fromRGB(60, 64, 80), 60)
-        gradient(card, Color3.fromRGB(34, 37, 50), Color3.fromRGB(16, 17, 23), 70)
+        local strokeGrad = gradient(stroke, CY, Color3.fromRGB(30, 50, 80), 45)
         local cardScale = Instance.new("UIScale")
-        cardScale.Scale = 0.9
+        cardScale.Scale = 0.92
         cardScale.Parent = card
 
         local function label(parentObj, txt, size, font, color, pos, sz, align)
@@ -194,187 +186,173 @@ do
             l.Parent = parentObj
             return l
         end
+        local function rect(parentObj, x, y, w, h, color, tr)
+            local f = Instance.new("Frame")
+            f.Size = UDim2.new(0, w, 0, h)
+            f.Position = UDim2.new(0, x, 0, y)
+            f.BackgroundColor3 = color
+            f.BackgroundTransparency = tr or 0
+            f.BorderSizePixel = 0
+            f.Parent = parentObj
+            return f
+        end
+        local RIGHT = Enum.TextXAlignment.Right
 
-        -- thanh tiêu đề giống menu
-        local header = Instance.new("Frame")
-        header.Size = UDim2.new(1, 0, 0, 38)
-        header.BackgroundColor3 = SIDEBAR
-        header.BackgroundTransparency = 0.2
-        header.BorderSizePixel = 0
-        header.Parent = card
-        local hl = Instance.new("Frame")
-        hl.Size = UDim2.new(1, 0, 0, 2)
-        hl.Position = UDim2.new(0, 0, 1, -2)
-        hl.BackgroundColor3 = ACCENT
-        hl.BackgroundTransparency = 0.1
-        hl.BorderSizePixel = 0
-        hl.Parent = header
+        -- lưới nền mờ
+        for gx = 0, CW, 28 do rect(card, gx, 0, 1, CH, CY, 0.95) end
+        for gy = 0, CH, 28 do rect(card, 0, gy, CW, 1, CY, 0.95) end
+        -- tia quét chạy dọc
+        local scan = Instance.new("Frame")
+        scan.Size = UDim2.new(1, 0, 0, 60)
+        scan.Position = UDim2.new(0, 0, 0, -60)
+        scan.BackgroundColor3 = CY
+        scan.BorderSizePixel = 0
+        scan.Parent = card
         do
             local g = Instance.new("UIGradient")
+            g.Rotation = 90
             g.Transparency = NumberSequence.new({
-                NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.5, 0), NumberSequenceKeypoint.new(1, 1)})
-            g.Parent = hl
+                NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.85, 0.93), NumberSequenceKeypoint.new(1, 0.7)})
+            g.Parent = scan
         end
-        local ht = label(header, "Minh Hub Premium  <font color=\"#8A8F9E\">|  Blox Fruits  |</font>", 13,
-            Enum.Font.GothamMedium, WHITE, UDim2.new(0, 16, 0, 0), UDim2.new(1, -140, 1, 0))
-        ht.RichText = true
-        local dot = Instance.new("Frame")
-        dot.AnchorPoint = Vector2.new(0, 0.5)
-        dot.Position = UDim2.new(1, -104, 0.5, 0)
-        dot.Size = UDim2.new(0, 8, 0, 8)
-        dot.BackgroundColor3 = ACCENT
-        dot.BorderSizePixel = 0
-        dot.Parent = header
+
+        -- 4 góc khung (bracket)
+        local function bracket(cx, cy, dx, dy)
+            local x0 = cx == 0 and 8 or CW - 8
+            local y0 = cy == 0 and 8 or CH - 8
+            local hx = dx == 1 and x0 or x0 - 22
+            local vy = dy == 1 and y0 or y0 - 22
+            rect(card, hx, y0 - (dy == -1 and 2 or 0), 22, 2, CY, 0.05)
+            rect(card, x0 - (dx == -1 and 2 or 0), vy, 2, 22, CY, 0.05)
+        end
+        bracket(0, 0, 1, 1) bracket(1, 0, -1, 1) bracket(0, 1, 1, -1) bracket(1, 1, -1, -1)
+
+        -- thanh trạng thái trên cùng
+        local dot = rect(card, 20, 16, 7, 7, CY, 0)
         corner(dot, 4)
-        label(header, "LOADING", 11, Enum.Font.GothamBold, MUTED,
-            UDim2.new(1, -90, 0, 0), UDim2.new(0, 74, 1, 0))
+        label(card, "MINH_HUB // BLOX_FRUITS // BOOT", 11, MONO, CY, UDim2.new(0, 34, 0, 10), UDim2.new(0, 300, 0, 18))
+        local timeL = label(card, "T+0.0s", 11, MONO, MUTED, UDim2.new(1, -120, 0, 10), UDim2.new(0, 100, 0, 18), RIGHT)
+        rect(card, 16, 34, CW - 32, 1, CY, 0.75)
 
-        -- logo tròn "M" + vòng xoay
-        local logo = Instance.new("Frame")
-        logo.Position = UDim2.new(0, 30, 0, 62)
-        logo.Size = UDim2.new(0, 70, 0, 70)
-        logo.BackgroundColor3 = SIDEBAR
-        logo.BorderSizePixel = 0
-        logo.Parent = card
-        corner(logo, 35)
-        local ls = Instance.new("UIStroke")
-        ls.Color = ACCENT
-        ls.Thickness = 2
-        ls.Parent = logo
-        label(logo, "M", 34, Enum.Font.GothamBlack, ACCENT, UDim2.new(0, 0, 0, 0), UDim2.new(1, 0, 1, 0), Enum.TextXAlignment.Center)
+        -- lõi "reactor": 3 vòng xoay ngược chiều + chữ M
+        local RX, RY = 92, 112
+        local rings, ringSpeed = {}, {160, -240, 340}
+        for i, r in ipairs({112, 86, 60}) do
+            local rf = Instance.new("Frame")
+            rf.AnchorPoint = Vector2.new(0.5, 0.5)
+            rf.Position = UDim2.new(0, RX, 0, RY)
+            rf.Size = UDim2.new(0, r, 0, r)
+            rf.BackgroundTransparency = 1
+            rf.Parent = card
+            corner(rf, r // 2)
+            local rs = Instance.new("UIStroke")
+            rs.Color = Color3.new(1, 1, 1)
+            rs.Thickness = i == 1 and 1.5 or 2.2
+            rs.Parent = rf
+            local g = Instance.new("UIGradient")
+            g.Color = ColorSequence.new(i == 2 and ACCENT or CY)
+            g.Transparency = NumberSequence.new({
+                NumberSequenceKeypoint.new(0, 1),
+                NumberSequenceKeypoint.new(0.3, 1),
+                NumberSequenceKeypoint.new(0.34, 0.05),
+                NumberSequenceKeypoint.new(0.62, 0.05),
+                NumberSequenceKeypoint.new(0.66, 1),
+                NumberSequenceKeypoint.new(1, 1),
+            })
+            g.Parent = rs
+            rings[i] = g
+        end
+        local core = Instance.new("Frame")
+        core.AnchorPoint = Vector2.new(0.5, 0.5)
+        core.Position = UDim2.new(0, RX, 0, RY)
+        core.Size = UDim2.new(0, 40, 0, 40)
+        core.BackgroundColor3 = Color3.fromRGB(10, 18, 32)
+        core.BorderSizePixel = 0
+        core.Parent = card
+        corner(core, 20)
+        local coreStroke = Instance.new("UIStroke")
+        coreStroke.Color = CY
+        coreStroke.Thickness = 1.5
+        coreStroke.Parent = core
+        label(core, "M", 22, Enum.Font.GothamBlack, Color3.new(1, 1, 1), UDim2.new(0, 0, 0, 0), UDim2.new(1, 0, 1, 0), Enum.TextXAlignment.Center)
 
-        local ringF = Instance.new("Frame")
-        ringF.AnchorPoint = Vector2.new(0.5, 0.5)
-        ringF.Position = UDim2.new(0.5, 0, 0.5, 0)
-        ringF.Size = UDim2.new(0, 84, 0, 84)
-        ringF.BackgroundTransparency = 1
-        ringF.Parent = logo
-        corner(ringF, 42)
-        local rs = Instance.new("UIStroke")
-        rs.Color = Color3.new(1, 1, 1)
-        rs.Thickness = 3
-        rs.Parent = ringF
-        local rg = Instance.new("UIGradient")
-        rg.Color = ColorSequence.new(ACCENT_L)
-        rg.Transparency = NumberSequence.new({
-            NumberSequenceKeypoint.new(0, 1),
-            NumberSequenceKeypoint.new(0.45, 1),
-            NumberSequenceKeypoint.new(0.5, 0.1),
-            NumberSequenceKeypoint.new(1, 0),
-        })
-        rg.Parent = rs
-
-        label(card, "MINH HUB", 28, Enum.Font.GothamBlack, Color3.new(1, 1, 1),
-            UDim2.new(0, 122, 0, 58), UDim2.new(0, 200, 0, 34))
-        label(card, "Premium • Blox Fruits", 14, Enum.Font.GothamMedium, ACCENT_L,
-            UDim2.new(0, 122, 0, 92), UDim2.new(0, 220, 0, 20))
+        -- tiêu đề + hiệu ứng glitch
+        local TX = 176
+        local ghostC = label(card, "MINH HUB", 36, Enum.Font.GothamBlack, CY, UDim2.new(0, TX, 0, 56), UDim2.new(0, 360, 0, 42))
+        local ghostR = label(card, "MINH HUB", 36, Enum.Font.GothamBlack, Color3.fromRGB(255, 70, 110), UDim2.new(0, TX, 0, 56), UDim2.new(0, 360, 0, 42))
+        ghostC.TextTransparency = 1
+        ghostR.TextTransparency = 1
+        local titleL = label(card, "MINH HUB", 36, Enum.Font.GothamBlack, Color3.new(1, 1, 1), UDim2.new(0, TX, 0, 56), UDim2.new(0, 360, 0, 42))
+        gradient(titleL, Color3.new(1, 1, 1), Color3.fromRGB(150, 215, 255), 90)
+        label(card, "// PREMIUM SCRIPT  ·  BLOX FRUITS", 12, MONO, CY, UDim2.new(0, TX, 0, 100), UDim2.new(0, 360, 0, 18))
         local dispName = "bạn"
         pcall(function() dispName = lp.DisplayName ~= "" and lp.DisplayName or lp.Name end)
         local welcomeL = label(card, "Xin chào, " .. dispName .. "! Đang chuẩn bị script...", 12, Enum.Font.Gotham, MUTED,
-            UDim2.new(0, 122, 0, 114), UDim2.new(0, 260, 0, 18))
+            UDim2.new(0, TX, 0, 122), UDim2.new(0, CW - TX - 24, 0, 18))
         welcomeL.TextTruncate = Enum.TextTruncate.AtEnd
+        local sysL = label(card, "SYS 0x000000  |  NET OK  |  UI SYNC", 11, MONO, Color3.fromRGB(90, 130, 160),
+            UDim2.new(0, TX, 0, 144), UDim2.new(0, CW - TX - 24, 0, 16))
 
-        -- phần trăm lớn bên phải
-        local pctL = label(card, "0%", 36, Enum.Font.GothamBlack, Color3.new(1, 1, 1),
-            UDim2.new(1, -150, 0, 62), UDim2.new(0, 126, 0, 46), Enum.TextXAlignment.Right)
-        gradient(pctL, Color3.new(1, 1, 1), ACCENT_L, 90)
-
-        -- thanh tiến trình to, rõ
-        local track = Instance.new("Frame")
-        track.Position = UDim2.new(0, 28, 0, 150)
-        track.Size = UDim2.new(1, -56, 0, 14)
-        track.BackgroundColor3 = SIDEBAR
-        track.BorderSizePixel = 0
-        track.Parent = card
-        corner(track, 7)
-        do
-            local ts = Instance.new("UIStroke")
-            ts.Color = BORDER
-            ts.Transparency = 0.5
-            ts.Parent = track
-        end
-        local fill = Instance.new("Frame")
-        fill.Size = UDim2.new(0, 0, 1, 0)
-        fill.BackgroundColor3 = Color3.new(1, 1, 1)
-        fill.BorderSizePixel = 0
-        fill.ClipsDescendants = true
-        fill.Parent = track
-        corner(fill, 7)
-        gradient(fill, Color3.fromRGB(44, 110, 230), ACCENT_L, 0)
-        local shimmer = Instance.new("Frame")
-        shimmer.Size = UDim2.new(0, 46, 1, 0)
-        shimmer.Position = UDim2.new(0, -46, 0, 0)
-        shimmer.BackgroundColor3 = Color3.new(1, 1, 1)
-        shimmer.BackgroundTransparency = 0
-        shimmer.BorderSizePixel = 0
-        shimmer.Parent = fill
-        do
-            local sg2 = Instance.new("UIGradient")
-            sg2.Transparency = NumberSequence.new({
-                NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.5, 0.55), NumberSequenceKeypoint.new(1, 1)})
-            sg2.Parent = shimmer
-        end
-        local tip = Instance.new("Frame")
-        tip.AnchorPoint = Vector2.new(0.5, 0.5)
-        tip.Size = UDim2.new(0, 18, 0, 18)
-        tip.Position = UDim2.new(0, 0, 0.5, 0)
-        tip.BackgroundColor3 = Color3.new(1, 1, 1)
-        tip.BorderSizePixel = 0
-        tip.ZIndex = 3
-        tip.Parent = track
-        corner(tip, 9)
-        do
-            local tsk = Instance.new("UIStroke")
-            tsk.Color = ACCENT
-            tsk.Thickness = 3
-            tsk.Transparency = 0.35
-            tsk.Parent = tip
-        end
-
-        -- dòng việc đang làm + thời gian
-        local step = label(card, "Starting...", 14, Enum.Font.GothamMedium, WHITE,
-            UDim2.new(0, 28, 0, 172), UDim2.new(1, -140, 0, 22))
+        -- khung terminal: 2 dòng cũ (mờ) + dòng hiện tại + phần trăm lớn
+        rect(card, 16, 172, CW - 32, 1, CY, 0.8)
+        local logOld2 = label(card, "", 12, MONO, Color3.fromRGB(70, 100, 125), UDim2.new(0, 28, 0, 178), UDim2.new(1, -190, 0, 16))
+        local logOld1 = label(card, "", 12, MONO, Color3.fromRGB(110, 150, 180), UDim2.new(0, 28, 0, 194), UDim2.new(1, -190, 0, 16))
+        label(card, ">", 12, MONO, CY, UDim2.new(0, 28, 0, 210), UDim2.new(0, 12, 0, 16))
+        local step = label(card, "Starting...", 12, MONO, WHITE, UDim2.new(0, 42, 0, 210), UDim2.new(1, -204, 0, 16))
+        logOld2.TextTruncate = Enum.TextTruncate.AtEnd
+        logOld1.TextTruncate = Enum.TextTruncate.AtEnd
         step.TextTruncate = Enum.TextTruncate.AtEnd
-        local timeL = label(card, "0.0s", 12, Enum.Font.Gotham, MUTED,
-            UDim2.new(1, -108, 0, 172), UDim2.new(0, 80, 0, 22), Enum.TextXAlignment.Right)
+        local lastStep = "Starting..."
+        step:GetPropertyChangedSignal("Text"):Connect(function()
+            if step.Text == lastStep then return end
+            logOld2.Text = logOld1.Text
+            logOld1.Text = "✓ " .. lastStep
+            lastStep = step.Text
+        end)
+        local pctL = label(card, "0%", 34, MONO, Color3.new(1, 1, 1), UDim2.new(1, -170, 0, 180), UDim2.new(0, 142, 0, 44), RIGHT)
+        pctL.Font = Enum.Font.GothamBlack
+        gradient(pctL, Color3.new(1, 1, 1), CY, 90)
 
-        -- 4 chặng: sáng lên khi tiến trình đạt mốc
+        -- thanh tiến trình dạng ô (segmented)
+        local SEG = 40
+        local segHolder = Instance.new("Frame")
+        segHolder.Position = UDim2.new(0, 28, 0, 238)
+        segHolder.Size = UDim2.new(1, -56, 0, 12)
+        segHolder.BackgroundTransparency = 1
+        segHolder.Parent = card
+        local segs = {}
+        for i = 1, SEG do
+            local sf = Instance.new("Frame")
+            sf.Position = UDim2.new((i - 1) / SEG, 0, 0, 0)
+            sf.Size = UDim2.new(1 / SEG, -3, 1, 0)
+            sf.BackgroundColor3 = Color3.fromRGB(24, 38, 56)
+            sf.BorderSizePixel = 0
+            sf.Parent = segHolder
+            segs[i] = {f = sf, lit = false}
+        end
+
+        -- 4 chặng
         local stages = {
-            {"Hệ thống", 20}, {"Dữ liệu", 45}, {"Giao diện", 75}, {"Hoàn tất", 100},
+            {"01 HỆ THỐNG", 20}, {"02 DỮ LIỆU", 45}, {"03 GIAO DIỆN", 75}, {"04 HOÀN TẤT", 100},
         }
         local chips = {}
-        local chipW = (500 - 56 - 3 * 8) / 4
+        local colW = (CW - 56) / 4
         for i, st in ipairs(stages) do
             local chip = Instance.new("Frame")
-            chip.Position = UDim2.new(0, 28 + (i - 1) * (chipW + 8), 0, 210)
-            chip.Size = UDim2.new(0, chipW, 0, 44)
-            chip.BackgroundColor3 = CARD
-            chip.BackgroundTransparency = 0.75
-            chip.BorderSizePixel = 0
+            chip.BackgroundTransparency = 1
+            chip.Position = UDim2.new(0, 28 + (i - 1) * colW, 0, 258)
+            chip.Size = UDim2.new(0, colW, 0, 20)
             chip.Parent = card
-            corner(chip, 8)
-            local cs = Instance.new("UIStroke")
-            cs.Color = BORDER
-            cs.Transparency = 0.7
-            cs.Parent = chip
-            local cd = Instance.new("Frame")
-            cd.AnchorPoint = Vector2.new(0, 0.5)
-            cd.Position = UDim2.new(0, 12, 0.5, 0)
-            cd.Size = UDim2.new(0, 10, 0, 10)
-            cd.BackgroundColor3 = MUTED
-            cd.BorderSizePixel = 0
-            cd.Parent = chip
-            corner(cd, 5)
-            local cl = label(chip, st[1], 12, Enum.Font.GothamBold, MUTED,
-                UDim2.new(0, 30, 0, 0), UDim2.new(1, -34, 1, 0))
-            chips[i] = {chip = chip, stroke = cs, dot = cd, lbl = cl, at = st[2], on = false}
+            local cd = rect(chip, 0, 7, 6, 6, MUTED, 0)
+            local cl = label(chip, st[1], 11, MONO, MUTED, UDim2.new(0, 12, 0, 0), UDim2.new(1, -12, 1, 0))
+            chips[i] = {chip = chip, dot = cd, lbl = cl, at = st[2], on = false}
         end
 
+        rect(card, 16, 288, CW - 32, 1, CY, 0.8)
         local hintL = label(card, "Menu sẽ tự mở khi tải xong", 11, Enum.Font.Gotham, MUTED,
-            UDim2.new(0, 28, 1, -30), UDim2.new(1, -56, 0, 18), Enum.TextXAlignment.Center)
+            UDim2.new(0, 28, 1, -42), UDim2.new(1, -56, 0, 18), Enum.TextXAlignment.Center)
         local TIPS = {
             "💡 Menu sẽ tự mở khi tải xong",
-            "💡 Tab Race V2/V3: tự lấy Mũ Chiến Binh rồi up V2/V3 ở Sea 2",
             "💡 Dùng Auto Farm Chest khi rảnh để gom Beli và rương",
             "💡 Nhấn nút Minh Hub để ẩn/hiện menu bất cứ lúc nào",
         }
@@ -383,7 +361,7 @@ do
         local target, shown, closed = 0, 0, false
 
         pcall(function()
-            Real:Create(cardScale, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Scale = 1}):Play()
+            Real:Create(cardScale, TweenInfo.new(0.45, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Scale = 1}):Play()
         end)
 
         local conn
@@ -393,35 +371,54 @@ do
             shown = shown + (target - shown) * math.min(1, dt * 2.5)
             if target - shown < 0.3 then shown = target end
             local frac = math.clamp(shown / 100, 0, 1)
-            fill.Size = UDim2.new(frac, 0, 1, 0)
-            tip.Position = UDim2.new(frac, 0, 0.5, 0)
             pctL.Text = string.format("%d%%", math.floor(shown + 0.5))
-            timeL.Text = string.format("%.1fs", t)
+            timeL.Text = string.format("T+%.1fs", t)
             if not _G.MinhHubGreeted then hintL.Text = TIPS[(math.floor(t / 2.2) % #TIPS) + 1] end
-            rg.Rotation = (t * 300) % 360
-            dot.BackgroundTransparency = 0.5 - 0.5 * math.sin(t * 5)
+            strokeGrad.Rotation = 45 + (t * 50) % 360
+            dot.BackgroundTransparency = 0.5 - 0.5 * math.sin(t * 6)
+            for i, g in ipairs(rings) do g.Rotation = (t * ringSpeed[i]) % 360 end
             for gi, gl in ipairs(glowLayers) do
-                gl.BackgroundTransparency = 0.9 + gi * 0.019 + 0.012 * math.sin(t * 2)
+                gl.BackgroundTransparency = 0.93 + gi * 0.015 + 0.012 * math.sin(t * 2.2)
             end
-            ls.Thickness = 2 + 0.8 * (0.5 + 0.5 * math.sin(t * 3))
-            local w = fill.AbsoluteSize.X
-            local p = (t % 1.4) / 1.4
-            shimmer.Position = UDim2.new(0, -46 + p * (w + 46), 0, 0)
+            coreStroke.Thickness = 1.5 + 0.8 * (0.5 + 0.5 * math.sin(t * 4))
+            scan.Position = UDim2.new(0, 0, 0, -60 + ((t % 2.8) / 2.8) * (CH + 60))
+            -- glitch tiêu đề thỉnh thoảng
+            local gOn = (t % 3.1) < 0.12
+            local off = gOn and prng:NextInteger(2, 4) or 0
+            ghostC.TextTransparency = gOn and 0.45 or 1
+            ghostR.TextTransparency = gOn and 0.55 or 1
+            ghostC.Position = UDim2.new(0, TX - off, 0, 56)
+            ghostR.Position = UDim2.new(0, TX + off, 0, 56 + (gOn and 1 or 0))
+            -- dòng đọc số liệu giả lập
+            if math.floor(t * 8) ~= math.floor((t - dt) * 8) then
+                sysL.Text = string.format("SYS 0x%06X  |  NET OK  |  UI SYNC", prng:NextInteger(0, 0xFFFFFF))
+            end
+            -- thanh ô
+            local litN = math.floor(frac * SEG + 0.5)
+            for i, s in ipairs(segs) do
+                local on = i <= litN
+                if on ~= s.lit then
+                    s.lit = on
+                    s.f.BackgroundColor3 = on and CY or Color3.fromRGB(24, 38, 56)
+                end
+                if on and i == litN and litN < SEG then
+                    s.f.BackgroundColor3 = Color3.fromRGB(255, 255, 255):Lerp(CY, 0.5 + 0.5 * math.sin(t * 12))
+                    s.lit = nil
+                end
+            end
             for _, c in ipairs(chips) do
                 local on = shown >= c.at - 0.5
                 if on ~= c.on then
                     c.on = on
                     local ti = TweenInfo.new(0.25)
-                    Real:Create(c.dot, ti, {BackgroundColor3 = on and ACCENT_L or MUTED}):Play()
+                    Real:Create(c.dot, ti, {BackgroundColor3 = on and CY or MUTED}):Play()
                     Real:Create(c.lbl, ti, {TextColor3 = on and Color3.new(1, 1, 1) or MUTED}):Play()
-                    Real:Create(c.stroke, ti, {Color = on and ACCENT or BORDER, Transparency = on and 0.1 or 0.7}):Play()
-                    Real:Create(c.chip, ti, {BackgroundTransparency = on and 0.35 or 0.75}):Play()
                 end
             end
             for _, pt in ipairs(particles) do
                 pt.y = pt.y - pt.v * dt
-                if pt.y < -0.02 then pt.y = 1.02 pt.x = prng:NextNumber() end
-                pt.f.Position = UDim2.new(pt.x + 0.012 * math.sin(t * pt.sw + pt.x * 6), 0, pt.y, 0)
+                if pt.y < -0.05 then pt.y = 1.05 pt.x = prng:NextNumber() end
+                pt.f.Position = UDim2.new(pt.x, 0, pt.y, 0)
             end
         end)
 
@@ -3117,6 +3114,7 @@ do
         {"🏝 Mirage Island", "🏝 Đảo Bí Ẩn"},
         {"🏝️ Stock: Mirage Island", "🏝️ Stock: Đảo Bí Ẩn (Mirage)"},
         {"Farm Height (Flight Altitude)", "Độ cao Farm (Bay cao)"},
+        {"Distance Farm Nearby Mobs", "Khoảng cách Farm quái gần"},
         {"Select Team", "Chọn phe / Select Team"},
         {"Select multiple stats (click to toggle)", "Chọn nhiều chỉ số (bấm để chọn/bỏ chọn)"},
         {"Points per allocation:", "Số điểm mỗi lần:"},
@@ -4073,7 +4071,99 @@ for index, targetName in ipairs({"Auto Level", "Cake Prince", "Bones", "Nearby M
     farmOptionBtns[targetName] = optBtn
 end
 
-createToggleFeature(farmPage, "AutoFarmTargetToggle", "Auto Farm", "Automatically farm the selected target", 12, autoFarmEnabled, function(state)
+-- DISTANCE FARM NEARBY MOBS SLIDER (ngay dưới ô chọn chế độ farm)
+;(function()
+    local MIN_R, MAX_R = 50, 1000
+    local startR = math.clamp(tonumber(_G.NearbyMobRadius) or 400, MIN_R, MAX_R)
+    _G.NearbyMobRadius = startR
+
+    local card = Instance.new("Frame")
+    card.Name = "NearbyMobDistanceCard"
+    card.Size = UDim2.new(1, 0, 0, 56)
+    card.BackgroundColor3 = BANANA_CARD
+    card.LayoutOrder = 12
+    card.Parent = farmPage
+    addCorner(card, 8)
+    addStroke(card, BANANA_CARD_BORDER, 1.2)
+
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(0.65, 0, 0, 28)
+    title.Position = UDim2.new(0, 12, 0, 4)
+    title.BackgroundTransparency = 1
+    title.Text = "Distance Farm Nearby Mobs"
+    title.TextColor3 = Color3.fromRGB(255, 255, 255)
+    title.TextSize = 12
+    title.Font = Enum.Font.GothamBold
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.Parent = card
+
+    local box = Instance.new("TextBox")
+    box.Size = UDim2.new(0, 60, 0, 24)
+    box.Position = UDim2.new(1, -70, 0, 6)
+    box.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+    box.TextColor3 = Color3.fromRGB(255, 255, 255)
+    box.TextSize = 12
+    box.Font = Enum.Font.GothamBold
+    box.Text = tostring(startR)
+    box.ClearTextOnFocus = false
+    box.Parent = card
+    addCorner(box, 6)
+
+    local track = Instance.new("TextButton")
+    track.Size = UDim2.new(1, -24, 0, 8)
+    track.Position = UDim2.new(0, 12, 1, -14)
+    track.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+    track.BorderSizePixel = 0
+    track.Text = ""
+    track.AutoButtonColor = false
+    track.Parent = card
+    addCorner(track, 4)
+
+    local fill = Instance.new("Frame")
+    fill.Size = UDim2.new((startR - MIN_R) / (MAX_R - MIN_R), 0, 1, 0)
+    fill.BackgroundColor3 = BANANA_YELLOW
+    fill.BorderSizePixel = 0
+    fill.Parent = track
+    addCorner(fill, 4)
+
+    local function setRadius(v)
+        v = math.clamp(math.floor(v), MIN_R, MAX_R)
+        _G.NearbyMobRadius = v
+        box.Text = tostring(v)
+        fill.Size = UDim2.new((v - MIN_R) / (MAX_R - MIN_R), 0, 1, 0)
+    end
+
+    local dragging = false
+    local function fromX(x)
+        local w = track.AbsoluteSize.X
+        if w <= 0 then return end
+        local rel = math.clamp((x - track.AbsolutePosition.X) / w, 0, 1)
+        setRadius(MIN_R + rel * (MAX_R - MIN_R))
+    end
+
+    track.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            fromX(input.Position.X)
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            fromX(input.Position.X)
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+    box.FocusLost:Connect(function()
+        local n = tonumber(box.Text)
+        if n then setRadius(n) else box.Text = tostring(_G.NearbyMobRadius) end
+    end)
+end)()
+
+createToggleFeature(farmPage, "AutoFarmTargetToggle", "Auto Farm", "Automatically farm the selected target", 13, autoFarmEnabled, function(state)
     autoFarmEnabled = state
     if not state and selectedFarmTarget == "Bones" and Q.BonesFarm then
         Q.BonesFarm.setStatus("Disabled")
@@ -4089,7 +4179,7 @@ createToggleFeature(farmPage, "AutoFarmTargetToggle", "Auto Farm", "Automaticall
     end
 end)
 
-createToggleFeature(farmPage, "AutoQuestToggle", "Auto Quest", "Automatically accept level-appropriate quests (including Haunted Castle)", 13, autoQuestEnabled, function(state)
+createToggleFeature(farmPage, "AutoQuestToggle", "Auto Quest", "Automatically accept level-appropriate quests (including Haunted Castle)", 14, autoQuestEnabled, function(state)
     autoQuestEnabled = state
 end)
 
@@ -8633,8 +8723,24 @@ _G.MHSpawn(function()
     local CollectionService = game:GetService("CollectionService")
     local attempts   = setmetatable({}, {__mode = "k"})  -- số lần thử mỗi rương
     local blacklist  = setmetatable({}, {__mode = "k"})  -- rương lỗi: bỏ qua tạm thời
+    -- SMART CHEST: giữ mục tiêu hiện tại (không đổi qua lại), chấm điểm theo cụm rương,
+    -- tránh rương đang có người chơi khác tranh, và ban lũy tiến cho rương lỗi.
+    local failCount     = setmetatable({}, {__mode = "k"})
+    local currentTarget = nil
+    local collectedCnt  = 0
+    _G.ChestStatus = "Idle"
+
+    local function chestUsable(chest)
+        if not chest or not chest.Parent or chest:GetAttribute("IsDisabled") then return false end
+        local ban = blacklist[chest]
+        return not (ban and tick() < ban)
+    end
 
     while task.wait(0.25) do
+        if not autoChestEnabled then
+            currentTarget = nil
+            _G.ChestStatus = "Disabled"
+        end
         if autoChestEnabled and Q.SmartController.canRun("chest") then
             -- Tác vụ ưu tiên cao đang chạy thì chỉ tạm chờ; giữ toggle để tự tiếp tục sau đó.
             pcall(function()
@@ -8663,19 +8769,57 @@ _G.MHSpawn(function()
                     -- tìm rương còn dùng được, gần nhất; bỏ qua rương bên trong Thuyền Ma
                     -- để không bị đưa vào lại sau khi vừa thoát ra.
                     local bestChest, bestDist, bestPos
+                    local cands = {}
                     for _, chest in ipairs(CollectionService:GetTagged("_ChestTagged")) do
-                        local banUntil = blacklist[chest]
-                        if chest.Parent and not chest:GetAttribute("IsDisabled") and not (banUntil and tick() < banUntil) then
+                        if chestUsable(chest) then
                             local ok, cf = pcall(function() return chest:GetPivot() end)
                             if ok and cf and not inCursedShip(cf.Position) then
-                                local d = (cf.Position - hrp.Position).Magnitude
-                                if not bestDist or d < bestDist then
-                                    bestChest, bestDist, bestPos = chest, d, cf.Position
-                                end
+                                cands[#cands + 1] = {chest = chest, pos = cf.Position,
+                                    d = (cf.Position - hrp.Position).Magnitude}
                             end
                         end
                     end
-                    if not bestChest then return end
+
+                    -- Giữ mục tiêu cũ nếu vẫn dùng được (tránh đổi hướng liên tục).
+                    if currentTarget and chestUsable(currentTarget) then
+                        for _, c in ipairs(cands) do
+                            if c.chest == currentTarget then
+                                bestChest, bestDist, bestPos = c.chest, c.d, c.pos
+                                break
+                            end
+                        end
+                    end
+
+                    -- Chọn mục tiêu mới: điểm thấp = tốt (gần, nằm trong cụm nhiều rương, không bị tranh).
+                    if not bestChest and #cands > 0 then
+                        local others = {}
+                        for _, p in ipairs(game:GetService("Players"):GetPlayers()) do
+                            if p ~= LocalPlayer and p.Character then
+                                local pr = p.Character:FindFirstChild("HumanoidRootPart")
+                                if pr then others[#others + 1] = pr.Position end
+                            end
+                        end
+                        local bestScore
+                        for _, c in ipairs(cands) do
+                            local cluster = 0
+                            for _, o in ipairs(cands) do
+                                if o ~= c and (o.pos - c.pos).Magnitude <= 200 then cluster += 1 end
+                            end
+                            local score = c.d - math.min(cluster, 5) * 40
+                            for _, op in ipairs(others) do
+                                if (op - c.pos).Magnitude <= 80 then score += 300 break end
+                            end
+                            if not bestScore or score < bestScore then
+                                bestScore, bestChest, bestDist, bestPos = score, c.chest, c.d, c.pos
+                            end
+                        end
+                    end
+                    currentTarget = bestChest
+                    if not bestChest then
+                        _G.ChestStatus = "No chest available"
+                        return
+                    end
+                    _G.ChestStatus = ("Chest: %d collected, %d left"):format(collectedCnt, #cands)
 
                     -- Thùng rương ở Thuyền Ma (hoặc ở ngoài thuyền) dùng cùng bộ điều phối cổng.
                     if Q.enterIfNeeded(hrp, bestPos, "chest") then return end
@@ -8695,11 +8839,18 @@ _G.MHSpawn(function()
                     if bestChest.Parent and not bestChest:GetAttribute("IsDisabled") then
                         attempts[bestChest] = (attempts[bestChest] or 0) + 1
                         if attempts[bestChest] >= 3 then
-                            blacklist[bestChest] = tick() + 60
+                            -- ban lũy tiến: 60s, 120s, 240s... tối đa 300s
+                            local f = (failCount[bestChest] or 0) + 1
+                            failCount[bestChest] = f
+                            blacklist[bestChest] = tick() + math.min(60 * 2 ^ (f - 1), 300)
                             attempts[bestChest] = 0
+                            currentTarget = nil
                         end
                     else
                         attempts[bestChest] = nil
+                        failCount[bestChest] = nil
+                        collectedCnt += 1
+                        currentTarget = nil
                     end
                 end)
         end
@@ -14607,516 +14758,6 @@ end)
 
 
 
-
--- =========================================================
--- TAB RACE (Sea 2): LẤY MŨ CHIẾN BINH (WARRIOR HELMET) -> UP RACE V2 -> UP RACE V3
---  Thứ tự bắt buộc: Warrior Helmet (nhiệm vụ Bartilo) -> V2 (Alchemist) -> V3 (Wenlocktoad)
---  * Tiến trình đọc từ server (BartiloQuestProgress / Alchemist / Wenlocktoad); mọi bước ghi log "[Race]" ở F9.
---  * Tái sử dụng bộ farm Boss + Fast Attack + bay có sẵn của hub.
---  * Toạ độ NPC / tên remote viết theo bản game phổ biến: nếu game đổi, xem log F9 để chỉnh trong Q.RACE.NPC.
--- =========================================================
-Q.RACE = { on = false, running = false, status = "Disabled", stage = "", lastTry = {},
-           doHelmet = true, doV2 = true, doV3 = true, plated = false }
-Q.RACE.NPC = {
-    Bartilo     = Vector3.new(-456.28, 73.07, 299.89),
-    Alchemist   = Vector3.new(-2778.80, 72.00, -3260.00),
-    Wenlocktoad = Vector3.new(-1760.00, 72.00, 1790.00),
-}
-Q.RACE.BOSS_POS = {
-    ["Swan Pirate"] = Vector3.new(1068.66, 137.61, 1322.11),
-    ["Zombie"]      = Vector3.new(-5622.03, 48.51, -728.75),
-    ["Fajita"]      = Vector3.new(-2000.00, 80.00, -4000.00),
-}
-
-function Q.RACE.setStatus(t) Q.RACE.status = t end
-function Q.RACE.log(...) print("[Race]", ...) pcall(Q.qlog, "Race:", ...) end
-function Q.RACE.every(key, gap)
-    local now = tick()
-    if now - (Q.RACE.lastTry[key] or 0) < gap then return false end
-    Q.RACE.lastTry[key] = now
-    return true
-end
-
-function Q.RACE.invoke(...)
-    local commF = getCommF()
-    if not commF then return nil end
-    local args = {...}
-    local done, ok, res = false, false, nil
-    _G.MHSpawn(function()
-        ok, res = pcall(function() return commF:InvokeServer(table.unpack(args)) end)
-        done = true
-    end)
-    local t0 = tick()
-    while not done and tick() - t0 < 6 do task.wait(0.1) end
-    if not done or not ok then return nil end
-    return res
-end
-
-function Q.RACE.raceName()
-    local n = "?"
-    pcall(function() n = tostring(LocalPlayer.Data.Race.Value) end)
-    return n
-end
-
--- QUÉT RACE: đọc Data.Race (+ các con, thuộc tính nhân vật) để biết V1/V2/V3. Trả về số phiên bản 1..3
-function Q.RACE.version()
-    local ver = 1
-    pcall(function()
-        local race = LocalPlayer.Data.Race
-        local ev = race:FindFirstChild("Evolved")
-        if ev then
-            ver = 2
-            local n = tonumber(ev.Value)
-            if n and n >= 3 then ver = 3 end
-        end
-        -- V3: tên con/thuộc tính chứa "v3" / "transformed" / "ability"
-        for _, c in ipairs(race:GetChildren()) do
-            local nm = string.lower(c.Name)
-            if (nm == "v3" or nm == "racev3" or nm == "transformed") and (c.Value == true or tonumber(c.Value) == 3) then ver = 3 end
-        end
-        local char = LocalPlayer.Character
-        if char then
-            if char:FindFirstChild("RaceTransformed") or char:GetAttribute("RaceV3") == true
-                or char:GetAttribute("RaceVersion") == 3 then ver = 3
-            elseif ver < 2 and (char:GetAttribute("RaceVersion") == 2 or char:GetAttribute("RaceV2") == true) then ver = 2 end
-        end
-        local a = race:GetAttribute("Version") or race:GetAttribute("RaceVersion")
-        if tonumber(a) and tonumber(a) > ver then ver = tonumber(a) end
-    end)
-    Q.RACE.ver = ver
-    return ver
-end
-
--- Race V2 đã mở chưa
-function Q.RACE.hasV2()
-    return Q.RACE.version() >= 2
-end
-
--- Race V3 đã mở chưa
-function Q.RACE.hasV3()
-    return Q.RACE.version() >= 3
-end
-
--- In toàn bộ Data.Race ra F9 để đối chiếu nếu quét sai
-_G.ScanRace = function()
-    print("[Race] === QUÉT RACE ===")
-    pcall(function()
-        local race = LocalPlayer.Data.Race
-        print("[Race] Data.Race =", tostring(race.Value))
-        for _, c in ipairs(race:GetChildren()) do
-            print("[Race]   con:", c.Name, c.ClassName, pcall(function() return tostring(c.Value) end) and tostring(c.Value) or "")
-        end
-        for k, v in pairs(race:GetAttributes()) do print("[Race]   attr:", k, tostring(v)) end
-    end)
-    pcall(function()
-        local char = LocalPlayer.Character
-        for k, v in pairs(char:GetAttributes()) do print("[Race]   char attr:", k, tostring(v)) end
-    end)
-    print("[Race] Phiên bản phát hiện: V" .. Q.RACE.version())
-    return Q.RACE.ver
-end
-
--- Mũ Chiến Binh (Warrior Helmet): túi, nhân vật, phụ kiện hoặc kho đồ server
-function Q.RACE.hasHelmet()
-    local function scan(c)
-        if not c then return false end
-        for _, t in ipairs(c:GetDescendants()) do
-            if string.find(string.lower(t.Name), "warrior helmet", 1, true) then return true end
-        end
-        return false
-    end
-    if scan(LocalPlayer:FindFirstChild("Backpack")) or scan(LocalPlayer.Character) then return true end
-    local inv = Q.RACE.invoke("getInventory")
-    if type(inv) == "table" then
-        local found = false
-        local function walk(t, d)
-            if d > 4 or found then return end
-            for k, it in pairs(t) do
-                if type(it) == "table" then
-                    local nm = it.Name or it.name or (type(k) == "string" and k or nil)
-                    if type(nm) == "string" and string.find(string.lower(nm), "warrior helmet", 1, true) then found = true return end
-                    walk(it, d + 1)
-                end
-            end
-        end
-        walk(inv, 0)
-        return found
-    end
-    return false
-end
-
-function Q.RACE.root()
-    local c = LocalPlayer.Character
-    return c and c:FindFirstChild("HumanoidRootPart")
-end
-
--- Bay tới điểm (qua cổng Thuyền Ma nếu cần) rồi đặt chính xác
-function Q.RACE.goto(pos, near)
-    local root = Q.RACE.root()
-    if not root then return false end
-    if Q.enterIfNeeded(root, pos, "race") then return false end
-    if (root.Position - pos).Magnitude <= (near or 10) then return true end
-    pcall(function()
-        flyTo(CFrame.new(pos + Vector3.new(0, 3, 0)), math.max(flySpeed or 190, 220), function()
-            return Q.RACE.on and LocalPlayer.Character ~= nil
-        end)
-    end)
-    local r2 = Q.RACE.root()
-    return r2 ~= nil and (r2.Position - pos).Magnitude <= (near or 10) + 12
-end
-
-function Q.RACE.fightBoss(name)
-    if Q.RACE.BOSS_POS[name] and not bossSpawnLocations[name] then bossSpawnLocations[name] = Q.RACE.BOSS_POS[name] end
-    if selectedBossTarget ~= name or selectedFarmTarget ~= "Farm Boss" or not autoFarmEnabled then
-        Q.DK.stopFarms()
-        selectedBossTarget = name
-        selectedFarmTarget = "Farm Boss"
-        pcall(function() bossDropdownLabel.Text = "👑 Boss: " .. name end)
-        autoFarmEnabled = true
-        Q.RACE.log("bật farm ->", name)
-    end
-end
-
-function Q.RACE.stopFight()
-    if selectedFarmTarget == "Farm Boss" and autoFarmEnabled then
-        autoFarmEnabled = false
-        if toggleUpdateFuncs["AutoFarmBossToggle"] then pcall(toggleUpdateFuncs["AutoFarmBossToggle"], false) end
-    end
-    if autoChestEnabled and Q.RACE.chestOn then
-        autoChestEnabled = false
-        Q.RACE.chestOn = false
-        if toggleUpdateFuncs["AutoFarmChestToggle"] then pcall(toggleUpdateFuncs["AutoFarmChestToggle"], false) end
-    end
-end
-
-function Q.RACE.talk(npcName, pos)
-    if not Q.RACE.goto(pos, 12) then return false end
-    local npc = Q.DK.findNpc(string.lower(npcName))
-    if npc and Q.SB and Q.SB.talk then
-        Q.SB.on = true
-        Q.SB.talk(npc, {"yes", "ok", "accept", "okay"}, nil, 8)
-        Q.SB.on = false
-    end
-    return true
-end
-
--- ===================== 1) WARRIOR HELMET (Bartilo) =====================
--- Đọc tiến độ Bartilo: server có thể trả SỐ (0/1/2/3...) hoặc BẢNG (KilledBandit/KilledSpring/DidPlates). Chuẩn hóa về bước 0..3
-function Q.RACE.bartiloStep(p)
-    if type(p) == "number" then return math.floor(p) end
-    if type(p) == "table" then
-        if p.DidPlates then return 3 end
-        if p.KilledSpring then return 2 end
-        if p.KilledBandit then return 1 end
-        return 0
-    end
-    return nil
-end
-
-function Q.RACE.startBartilo()
-    if not Q.RACE.every("bartiloStart", 8) then return end
-    if Q.RACE.goto(Q.RACE.NPC.Bartilo, 12) then
-        Q.RACE.log("nhận quest Bartilo ->", tostring(Q.RACE.invoke("StartQuest", "BartiloQuest", 1)))
-        Q.RACE.talk("bartilo", Q.RACE.NPC.Bartilo)
-    end
-end
-
-function Q.RACE.stepHelmet()
-    Q.RACE.setStatus("Mũ Chiến Binh: nhiệm vụ Bartilo")
-    local raw = Q.RACE.invoke("BartiloQuestProgress", "Bartilo")
-    local st = Q.RACE.bartiloStep(raw)
-    if Q.RACE.every("bartiloDump", 15) then
-        local dump = {}
-        if type(raw) == "table" then for k, v in pairs(raw) do dump[#dump + 1] = tostring(k) .. "=" .. tostring(v) end
-        else dump[1] = tostring(raw) end
-        Q.RACE.log("Bartilo tiến độ:", table.concat(dump, ", "), "-> bước", tostring(st))
-    end
-    if st == nil then
-        -- server không trả gì: nhận quest ở Bartilo rồi thử lại
-        Q.RACE.stopFight()
-        Q.RACE.startBartilo()
-        return
-    end
-
-    if st <= 0 then
-        -- chưa nhận hoặc đang diệt Swan Pirates: đảm bảo đã nhận quest
-        Q.RACE.setStatus("Bartilo: diệt Swan Pirates")
-        if Q.RACE.every("bartiloAccept", 60) then Q.RACE.startBartilo() end
-        Q.RACE.fightBoss("Swan Pirate")
-    elseif st == 1 then
-        Q.RACE.setStatus("Bartilo: đánh Jeremy")
-        Q.RACE.fightBoss("Jeremy")
-    elseif st == 2 then
-        Q.RACE.stopFight()
-        Q.RACE.setStatus("Bartilo: giẫm các nút (plates)")
-        local scope = workspace:FindFirstChild("Map") or workspace
-        local list = Q.SB.findAll({"plate"}, scope)
-        if #list == 0 then Q.RACE.log("không thấy plates trong Map") end
-        for _, o in ipairs(list) do
-            if not Q.RACE.on then return end
-            if o:IsA("BasePart") then Q.SB.goAndActivate(o, 0.6) end
-        end
-        Q.RACE.invoke("BartiloQuestProgress", "DidPlates")
-    else
-        Q.RACE.stopFight()
-        Q.RACE.setStatus("Bartilo: trả nhiệm vụ nhận Mũ Chiến Binh")
-        Q.RACE.talk("bartilo", Q.RACE.NPC.Bartilo)
-        Q.RACE.invoke("BartiloQuestProgress", "Bartilo")
-        -- đã trả nhiệm vụ: coi như xong bước mũ (tránh kẹt nếu không đọc được mũ trong túi)
-        Q.RACE.bartiloDoneCount = (Q.RACE.bartiloDoneCount or 0) + 1
-        if Q.RACE.bartiloDoneCount >= 3 then Q.RACE.helmetDone = true end
-    end
-end
-
--- ===================== 2) RACE V2 (Alchemist) =====================
-function Q.RACE.hasFlower(n)
-    local function scan(c)
-        if not c then return false end
-        for _, t in ipairs(c:GetChildren()) do
-            local nm = string.lower(t.Name)
-            if string.find(nm, "flower", 1, true) and (string.find(nm, tostring(n), 1, true)
-                or string.find(nm, ({"blue", "red", "yellow"})[n], 1, true)) then return true end
-        end
-        return false
-    end
-    return scan(LocalPlayer:FindFirstChild("Backpack")) or scan(LocalPlayer.Character)
-end
-
-function Q.RACE.stepV2()
-    Q.RACE.setStatus("Race V2: Alchemist + 3 hoa")
-    if Q.RACE.every("alchemist1", 20) then Q.RACE.log("Alchemist 1 ->", tostring(Q.RACE.invoke("Alchemist", "1"))) end
-    if not (Q.RACE.hasFlower(1) and Q.RACE.hasFlower(2) and Q.RACE.hasFlower(3)) then
-        -- Nhận quest ở Alchemist rồi đi gom hoa
-        if Q.RACE.every("alchemistTalk", 20) then
-            if Q.RACE.goto(Q.RACE.NPC.Alchemist, 12) then
-                Q.RACE.invoke("Alchemist", "2")
-                Q.RACE.talk("alchemist", Q.RACE.NPC.Alchemist)
-            end
-        end
-        -- Hoa xanh (Flower1, chỉ xuất hiện ban đêm) và hoa đỏ (Flower2) nằm trong workspace
-        for n = 1, 2 do
-            if not Q.RACE.hasFlower(n) then
-                local f = workspace:FindFirstChild("Flower" .. n)
-                if f then
-                    Q.RACE.setStatus(("Race V2: nhặt hoa %s"):format(n == 1 and "xanh" or "đỏ"))
-                    Q.RACE.stopFight()
-                    Q.SB.goAndActivate(f, 0.8)
-                    return
-                elseif n == 1 then
-                    Q.RACE.setStatus("Race V2: hoa xanh chỉ xuất hiện ban đêm - đang chờ...")
-                end
-            end
-        end
-        -- Hoa vàng rớt từ Zombie
-        if not Q.RACE.hasFlower(3) then
-            Q.RACE.setStatus("Race V2: diệt Zombie để lấy hoa vàng")
-            Q.RACE.fightBoss("Zombie")
-        else
-            Q.RACE.stopFight()
-        end
-        return
-    end
-    Q.RACE.stopFight()
-    Q.RACE.setStatus("Race V2: đưa hoa cho Alchemist và uống thuốc")
-    if Q.RACE.goto(Q.RACE.NPC.Alchemist, 12) then
-        Q.RACE.invoke("Alchemist", "3")
-        Q.RACE.talk("alchemist", Q.RACE.NPC.Alchemist)
-    end
-end
-
--- ===================== 3) RACE V3 (Wenlocktoad) =====================
-function Q.RACE.stepV3()
-    local race = Q.RACE.raceName()
-    Q.RACE.setStatus("Race V3: Wenlocktoad (" .. race .. ")")
-    if Q.RACE.every("wenlockInfo", 30) then
-        Q.RACE.log("Wenlocktoad 1 ->", tostring(Q.RACE.invoke("Wenlocktoad", "1")))
-    end
-    local r = string.lower(race)
-    if string.find(r, "human", 1, true) then
-        Q.RACE.setStatus("Race V3 (Human): diệt Diamond / Jeremy / Fajita")
-        for _, b in ipairs({"Diamond", "Jeremy", "Fajita"}) do
-            local live = false
-            local ef = workspace:FindFirstChild("Enemies")
-            if ef then
-                for _, m in ipairs(ef:GetChildren()) do
-                    local h = m:FindFirstChildOfClass("Humanoid")
-                    if h and h.Health > 0 and string.find(string.lower(m.Name), string.lower(b), 1, true) then live = true end
-                end
-            end
-            if live then Q.RACE.fightBoss(b) return end
-        end
-        -- chưa thấy boss nào: bay tới chỗ hồi sinh của từng boss
-        Q.RACE.bossIdx = ((Q.RACE.bossIdx or 0) % 3) + 1
-        Q.RACE.fightBoss(({"Diamond", "Jeremy", "Fajita"})[Q.RACE.bossIdx])
-    elseif string.find(r, "mink", 1, true) then
-        Q.RACE.setStatus("Race V3 (Mink): nhặt rương, không được chết")
-        if not autoChestEnabled then
-            Q.RACE.chestOn = true
-            autoChestEnabled = true
-            if toggleUpdateFuncs["AutoFarmChestToggle"] then pcall(toggleUpdateFuncs["AutoFarmChestToggle"], true) end
-        end
-    else
-        Q.RACE.setStatus("Race V3 (" .. race .. "): nhiệm vụ này cần làm tay, script chỉ gọi Wenlocktoad")
-    end
-    if Q.RACE.every("wenlockFinish", 20) then
-        Q.RACE.log("Wenlocktoad 2 ->", tostring(Q.RACE.invoke("Wenlocktoad", "2")))
-        Q.RACE.log("Wenlocktoad 3 ->", tostring(Q.RACE.invoke("Wenlocktoad", "3")))
-    end
-end
-
-function Q.RACE.finish(msg)
-    Q.RACE.setStatus(msg)
-    Q.RACE.log(msg)
-    Q.RACE.stopFight()
-    Q.RACE.on = false
-    if toggleUpdateFuncs["AutoRaceUpgradeToggle"] then pcall(toggleUpdateFuncs["AutoRaceUpgradeToggle"], false) end
-end
-
-function Q.RACE.step()
-    if not World2 then
-        if not World3 then
-            -- Sea 1: tự chuyển sang Sea 2
-            Q.RACE.setStatus("Đang chuyển sang Sea 2...")
-            if Q.RACE.every("travel2", 15) then Q.RACE.log("TravelDressrosa ->", tostring(Q.RACE.invoke("TravelDressrosa"))) end
-        else
-            Q.RACE.setStatus("Chỉ có ở Sea 2 (đang ở Sea 3, hãy sang Sea 2)")
-        end
-        return
-    end
-    if Q.RACE.hasV3() then Q.RACE.finish("Đã có Race V3 ✅") return end
-
-    -- cập nhật trạng thái mũ mỗi 15s (getInventory chậm nên không gọi mỗi vòng)
-    if Q.RACE.every("helmetScan", 15) then
-        Q.RACE.helmetCache = Q.RACE.hasHelmet()
-    end
-    local helmet = Q.RACE.helmetDone or Q.RACE.helmetCache == true
-
-    local stage
-    if Q.RACE.hasV2() then
-        -- đã có V2 thì không cần làm mũ nữa
-        if Q.RACE.doV3 then stage = "v3" else Q.RACE.finish("Xong các mục đã chọn") return end
-    elseif not helmet and Q.RACE.doHelmet then stage = "helmet"
-    elseif Q.RACE.doV2 then stage = "v2"
-    else
-        Q.RACE.finish("Xong các mục đã chọn")
-        return
-    end
-    if stage ~= Q.RACE.stage then
-        Q.RACE.stage = stage
-        Q.RACE.stopFight()
-        Q.RACE.log("giai đoạn:", stage, "| race:", Q.RACE.raceName(), "| V" .. Q.RACE.version(), "| helmet:", tostring(helmet))
-    end
-    if stage == "helmet" then Q.RACE.stepHelmet()
-    elseif stage == "v2" then Q.RACE.stepV2()
-    else Q.RACE.stepV3() end
-end
-
-function Q.RACE.loop()
-    if Q.RACE.running then return end
-    Q.RACE.running = true
-    while Q.RACE.on do
-        task.wait(1.5)
-        local ok, err = pcall(Q.RACE.step)
-        if not ok then Q.RACE.log("lỗi:", tostring(err)) end
-    end
-    Q.RACE.running = false
-    if not string.find(Q.RACE.status, "✅", 1, true) then Q.RACE.setStatus("Disabled") end
-end
-
--- ===================== GIAO DIỆN: TAB "Race V2/V3" =====================
-;(function()
-    local racePage = createTab("RaceV", "", false)
-    pcall(function()
-        tabs["RaceV"].Button.Text = "Race V2/V3"
-        tabs["RaceV"].Button.LayoutOrder = 6
-    end)
-    -- đổi tên hiển thị tiêu đề trang khi chọn tab (tab đặt tên bên trong createTab dùng tên khóa)
-    pcall(function()
-        tabs["RaceV"].Button.MouseButton1Click:Connect(function() pageTitle.Text = "Race V2/V3" end)
-    end)
-    MH.section(racePage, "Race V2 / V3 (Sea 2)", -1)
-
-    -- thẻ trạng thái
-    local card = Instance.new("Frame")
-    card.Size = UDim2.new(1, 0, 0, 62)
-    card.BackgroundColor3 = BANANA_CARD
-    card.LayoutOrder = 0
-    card.Parent = racePage
-    addCorner(card, 8)
-    addStroke(card, BANANA_CARD_BORDER, 1.2)
-    local txt = Instance.new("TextLabel")
-    txt.Size = UDim2.new(1, -24, 1, -8)
-    txt.Position = UDim2.new(0, 12, 0, 4)
-    txt.BackgroundTransparency = 1
-    txt.TextColor3 = Color3.fromRGB(190, 190, 205)
-    txt.TextSize = 11
-    txt.Font = Enum.Font.Gotham
-    txt.TextWrapped = true
-    txt.TextXAlignment = Enum.TextXAlignment.Left
-    txt.TextYAlignment = Enum.TextYAlignment.Top
-    txt.Parent = card
-    _G.MHSpawn(function()
-        while txt.Parent do
-            pcall(function()
-                txt.Text = string.format("🧬 Race: %s  |  V2: %s  |  V3: %s\n🪖 Warrior Helmet: %s\nStatus: %s",
-                    Q.RACE.raceName(), Q.RACE.hasV2() and "✅" or "❌", Q.RACE.hasV3() and "✅" or "❌",
-                    (Q.RACE.helmetCache and "✅" or "❌"), tostring(Q.RACE.status))
-            end)
-            task.wait(0.7)
-        end
-    end)
-    _G.MHSpawn(function()
-        while card.Parent do
-            if World2 and tick() - (Q.RACE.helmetAt or 0) > 20 then
-                Q.RACE.helmetAt = tick()
-                pcall(function() Q.RACE.helmetCache = Q.RACE.hasHelmet() end)
-            end
-            task.wait(2)
-        end
-    end)
-
-    createToggleFeature(racePage, "AutoRaceUpgradeToggle", "Auto Race V2/V3",
-        "Sea 2: get the Warrior Helmet first (Bartilo quest) → upgrade Race V2 (Alchemist) → upgrade Race V3 (Wenlocktoad)",
-        1, false, function(state)
-            Q.RACE.on = state
-            if state then
-                Q.RACE.stage = ""
-                Q.RACE.helmetDone = false
-                Q.RACE.bartiloDoneCount = 0
-                Q.RACE.lastTry = {}
-                Q.RACE.setStatus("Đang khởi động...")
-                Q.RACE.log("BẬT Auto Race | World2 =", tostring(World2), "| V" .. Q.RACE.version())
-                _G.MHSpawn(Q.RACE.loop)
-            else
-                Q.RACE.stopFight()
-                Q.RACE.setStatus("Disabled")
-            end
-        end)
-
-    createToggleFeature(racePage, "RaceHelmetToggle", "Lấy Mũ Chiến Binh (Warrior Helmet)",
-        "Bắt buộc làm trước V2/V3: nhiệm vụ Bartilo (Swan Pirates → Jeremy → plates)",
-        2, Q.RACE.doHelmet, function(state) Q.RACE.doHelmet = state end)
-    createToggleFeature(racePage, "RaceV2Toggle", "Up Race V2",
-        "Alchemist: gom hoa xanh (ban đêm) + hoa đỏ + hoa vàng (Zombie) rồi uống thuốc",
-        3, Q.RACE.doV2, function(state) Q.RACE.doV2 = state end)
-    createToggleFeature(racePage, "RaceV3Toggle", "Up Race V3",
-        "Wenlocktoad: Human đánh 3 boss, Mink nhặt rương; các tộc khác cần làm tay",
-        4, Q.RACE.doV3, function(state) Q.RACE.doV3 = state end)
-
-    MH.section(racePage, "Raid / Misc", 10)
-end)()
-
-_G.CheckRace = function()
-    print("[Race] Race =", Q.RACE.raceName(), "| V2 =", Q.RACE.hasV2(), "| V3 =", Q.RACE.hasV3(), "| Helmet =", Q.RACE.hasHelmet())
-    print("[Race] Alchemist 1 ->", tostring(Q.RACE.invoke("Alchemist", "1")))
-    local p = Q.RACE.invoke("BartiloQuestProgress", "Bartilo")
-    if type(p) == "table" then for k, v in pairs(p) do print("   Bartilo", k, v) end else print("   Bartilo ->", tostring(p)) end
-end
-_G.AutoRaceUpgrade = function(on)
-    if toggleUpdateFuncs["AutoRaceUpgradeToggle"] then pcall(toggleUpdateFuncs["AutoRaceUpgradeToggle"], on ~= false) end
-    Q.RACE.on = (on ~= false)
-    if Q.RACE.on then _G.MHSpawn(Q.RACE.loop) end
-end
 
 
 -- MENU SAFETY: đảm bảo ScreenGui không bị tắt/ẩn sau khi thêm module Shop.
