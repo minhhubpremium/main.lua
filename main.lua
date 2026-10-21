@@ -107,15 +107,18 @@ do
             return g
         end
 
-        -- ===== GIAO DIỆN LOADING KIỂU CÔNG NGHỆ (HUD / terminal) =====
+        -- ===== LOADING GỌN NHỎ (kiểu công nghệ) + THÔNG BÁO SCRIPT TRƯỢT VÀO GÓC PHẢI =====
         local CY = Color3.fromRGB(70, 210, 255)
+        local MUT = Color3.fromRGB(110, 135, 158)
         local MONO = Enum.Font.Code
-        local CW, CH = 560, 340
+        local CW, CH = 380, 222
+        local CEN, RIGHT = Enum.TextXAlignment.Center, Enum.TextXAlignment.Right
 
+        -- nền chỉ phủ nhẹ để vẫn thấy game phía sau
         local dim = Instance.new("Frame")
         dim.Size = UDim2.new(1, 0, 1, 0)
-        dim.BackgroundColor3 = Color3.fromRGB(3, 5, 10)
-        dim.BackgroundTransparency = 0.15
+        dim.BackgroundColor3 = Color3.fromRGB(2, 5, 10)
+        dim.BackgroundTransparency = 0.6
         dim.BorderSizePixel = 0
         dim.Parent = gui
 
@@ -125,54 +128,19 @@ do
             blur.Name = "MinhHubLoadingBlur"
             blur.Size = 0
             blur.Parent = game:GetService("Lighting")
-            Real:Create(blur, TweenInfo.new(0.6), {Size = 16}):Play()
+            Real:Create(blur, TweenInfo.new(0.6), {Size = 7}):Play()
         end)
 
-        local particles = {}
-        local prng = Random.new(os.time())
-        for i = 1, 20 do
-            local pf = Instance.new("Frame")
-            pf.Size = UDim2.new(0, 2, 0, prng:NextInteger(6, 16))
-            pf.BackgroundColor3 = CY
-            pf.BackgroundTransparency = prng:NextNumber(0.7, 0.92)
-            pf.BorderSizePixel = 0
-            pf.Parent = gui
-            particles[i] = {f = pf, x = prng:NextNumber(), y = prng:NextNumber(), v = prng:NextNumber(0.04, 0.12), sw = 0}
+        local function rect(parentObj, x, y, w, h, color, tr)
+            local f = Instance.new("Frame")
+            f.Size = UDim2.new(0, w, 0, h)
+            f.Position = UDim2.new(0, x, 0, y)
+            f.BackgroundColor3 = color
+            f.BackgroundTransparency = tr or 0
+            f.BorderSizePixel = 0
+            f.Parent = parentObj
+            return f
         end
-
-        local glowLayers = {}
-        for i = 1, 4 do
-            local gl = Instance.new("Frame")
-            gl.AnchorPoint = Vector2.new(0.5, 0.5)
-            gl.Position = UDim2.new(0.5, 0, 0.5, 0)
-            gl.Size = UDim2.new(0, CW + i * 16, 0, CH + i * 16)
-            gl.BackgroundColor3 = CY
-            gl.BackgroundTransparency = 0.93 + i * 0.015
-            gl.BorderSizePixel = 0
-            gl.Parent = gui
-            corner(gl, 6 + i * 6)
-            glowLayers[i] = gl
-        end
-
-        local card = Instance.new("Frame")
-        card.Size = UDim2.new(0, CW, 0, CH)
-        card.AnchorPoint = Vector2.new(0.5, 0.5)
-        card.Position = UDim2.new(0.5, 0, 0.5, 0)
-        card.BackgroundColor3 = Color3.fromRGB(6, 10, 18)
-        card.BackgroundTransparency = 0.04
-        card.BorderSizePixel = 0
-        card.ClipsDescendants = true
-        card.Parent = gui
-        corner(card, 6)
-        local stroke = Instance.new("UIStroke")
-        stroke.Color = Color3.new(1, 1, 1)
-        stroke.Thickness = 1.2
-        stroke.Parent = card
-        local strokeGrad = gradient(stroke, CY, Color3.fromRGB(30, 50, 80), 45)
-        local cardScale = Instance.new("UIScale")
-        cardScale.Scale = 0.92
-        cardScale.Parent = card
-
         local function label(parentObj, txt, size, font, color, pos, sz, align)
             local l = Instance.new("TextLabel")
             l.BackgroundTransparency = 1
@@ -186,176 +154,286 @@ do
             l.Parent = parentObj
             return l
         end
-        local function rect(parentObj, x, y, w, h, color, tr)
-            local f = Instance.new("Frame")
-            f.Size = UDim2.new(0, w, 0, h)
-            f.Position = UDim2.new(0, x, 0, y)
-            f.BackgroundColor3 = color
-            f.BackgroundTransparency = tr or 0
-            f.BorderSizePixel = 0
-            f.Parent = parentObj
-            return f
-        end
-        local RIGHT = Enum.TextXAlignment.Right
 
-        -- lưới nền mờ
-        for gx = 0, CW, 28 do rect(card, gx, 0, 1, CH, CY, 0.95) end
-        for gy = 0, CH, 28 do rect(card, 0, gy, CW, 1, CY, 0.95) end
-        -- tia quét chạy dọc
-        local scan = Instance.new("Frame")
-        scan.Size = UDim2.new(1, 0, 0, 60)
-        scan.Position = UDim2.new(0, 0, 0, -60)
-        scan.BackgroundColor3 = CY
-        scan.BorderSizePixel = 0
-        scan.Parent = card
+        -- quầng sáng mềm
+        local glowLayers = {}
+        for i = 1, 4 do
+            local gl = Instance.new("Frame")
+            gl.AnchorPoint = Vector2.new(0.5, 0.5)
+            gl.Position = UDim2.new(0.5, 0, 0.5, 0)
+            gl.Size = UDim2.new(0, CW + i * 14, 0, CH + i * 14)
+            gl.BackgroundColor3 = CY
+            gl.BackgroundTransparency = 0.93 + i * 0.016
+            gl.BorderSizePixel = 0
+            gl.Parent = gui
+            corner(gl, 6 + i * 5)
+            glowLayers[i] = gl
+        end
+
+        local card = Instance.new("Frame")
+        card.Size = UDim2.new(0, CW, 0, CH)
+        card.AnchorPoint = Vector2.new(0.5, 0.5)
+        card.Position = UDim2.new(0.5, 0, 0.5, 0)
+        card.BackgroundColor3 = Color3.fromRGB(7, 12, 21)
+        card.BackgroundTransparency = 0.05
+        card.BorderSizePixel = 0
+        card.ClipsDescendants = true
+        card.Parent = gui
+        corner(card, 8)
+        local stroke = Instance.new("UIStroke")
+        stroke.Color = Color3.new(1, 1, 1)
+        stroke.Thickness = 1.3
+        stroke.Parent = card
+        local strokeGrad = gradient(stroke, CY, Color3.fromRGB(24, 44, 70), 45)
+        local cardScale = Instance.new("UIScale")
+        cardScale.Scale = 0.9
+        cardScale.Parent = card
+
+        -- lưới mờ + tia quét
+        for gx = 0, CW, 24 do rect(card, gx, 0, 1, CH, CY, 0.96) end
+        for gy = 0, CH, 24 do rect(card, 0, gy, CW, 1, CY, 0.96) end
+        local scan = rect(card, 0, -40, CW, 40, CY, 0)
         do
             local g = Instance.new("UIGradient")
             g.Rotation = 90
             g.Transparency = NumberSequence.new({
-                NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.85, 0.93), NumberSequenceKeypoint.new(1, 0.7)})
+                NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.88, 0.93), NumberSequenceKeypoint.new(1, 0.72)})
             g.Parent = scan
         end
 
-        -- 4 góc khung (bracket)
-        local function bracket(cx, cy, dx, dy)
-            local x0 = cx == 0 and 8 or CW - 8
-            local y0 = cy == 0 and 8 or CH - 8
-            local hx = dx == 1 and x0 or x0 - 22
-            local vy = dy == 1 and y0 or y0 - 22
-            rect(card, hx, y0 - (dy == -1 and 2 or 0), 22, 2, CY, 0.05)
-            rect(card, x0 - (dx == -1 and 2 or 0), vy, 2, 22, CY, 0.05)
+        -- thanh trên cùng
+        local dot = rect(card, 14, 11, 6, 6, CY, 0)
+        corner(dot, 3)
+        label(card, "MINH_HUB // LOADING", 10, MONO, CY, UDim2.new(0, 26, 0, 6), UDim2.new(0, 200, 0, 16))
+        local timeL = label(card, "T+0.0s", 10, MONO, MUT, UDim2.new(1, -90, 0, 6), UDim2.new(0, 76, 0, 16), RIGHT)
+        rect(card, 12, 26, CW - 24, 1, CY, 0.78)
+
+        -- lõi nhỏ: 2 vòng xoay + chấm quay quanh chữ M
+        local RX, RY = 62, 86
+        local halos = {}
+        for i = 1, 3 do
+            local h = Instance.new("Frame")
+            h.AnchorPoint = Vector2.new(0.5, 0.5)
+            h.Position = UDim2.new(0, RX, 0, RY)
+            h.Size = UDim2.new(0, 60 + i * 20, 0, 60 + i * 20)
+            h.BackgroundColor3 = CY
+            h.BackgroundTransparency = 0.93 + i * 0.012
+            h.BorderSizePixel = 0
+            h.Parent = card
+            corner(h, 30 + i * 10)
+            halos[i] = h
         end
-        bracket(0, 0, 1, 1) bracket(1, 0, -1, 1) bracket(0, 1, 1, -1) bracket(1, 1, -1, -1)
-
-        -- thanh trạng thái trên cùng
-        local dot = rect(card, 20, 16, 7, 7, CY, 0)
-        corner(dot, 4)
-        label(card, "MINH_HUB // BLOX_FRUITS // BOOT", 11, MONO, CY, UDim2.new(0, 34, 0, 10), UDim2.new(0, 300, 0, 18))
-        local timeL = label(card, "T+0.0s", 11, MONO, MUTED, UDim2.new(1, -120, 0, 10), UDim2.new(0, 100, 0, 18), RIGHT)
-        rect(card, 16, 34, CW - 32, 1, CY, 0.75)
-
-        -- lõi "reactor": 3 vòng xoay ngược chiều + chữ M
-        local RX, RY = 92, 112
-        local rings, ringSpeed = {}, {160, -240, 340}
-        for i, r in ipairs({112, 86, 60}) do
+        local rings, ringSpeed = {}, {160, -260}
+        for i, r in ipairs({86, 64}) do
             local rf = Instance.new("Frame")
             rf.AnchorPoint = Vector2.new(0.5, 0.5)
             rf.Position = UDim2.new(0, RX, 0, RY)
             rf.Size = UDim2.new(0, r, 0, r)
             rf.BackgroundTransparency = 1
             rf.Parent = card
-            corner(rf, r // 2)
+            corner(rf, math.floor(r / 2))
             local rs = Instance.new("UIStroke")
             rs.Color = Color3.new(1, 1, 1)
-            rs.Thickness = i == 1 and 1.5 or 2.2
+            rs.Thickness = 2
             rs.Parent = rf
             local g = Instance.new("UIGradient")
-            g.Color = ColorSequence.new(i == 2 and ACCENT or CY)
+            g.Color = ColorSequence.new(i == 2 and Color3.fromRGB(0, 140, 255) or CY)
             g.Transparency = NumberSequence.new({
-                NumberSequenceKeypoint.new(0, 1),
-                NumberSequenceKeypoint.new(0.3, 1),
-                NumberSequenceKeypoint.new(0.34, 0.05),
-                NumberSequenceKeypoint.new(0.62, 0.05),
-                NumberSequenceKeypoint.new(0.66, 1),
-                NumberSequenceKeypoint.new(1, 1),
-            })
+                NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.28, 1),
+                NumberSequenceKeypoint.new(0.32, 0.05), NumberSequenceKeypoint.new(0.66, 0.05),
+                NumberSequenceKeypoint.new(0.7, 1), NumberSequenceKeypoint.new(1, 1)})
             g.Parent = rs
             rings[i] = g
+        end
+        local orbits = {}
+        for i = 1, 3 do
+            local o = Instance.new("Frame")
+            o.AnchorPoint = Vector2.new(0.5, 0.5)
+            o.Size = UDim2.new(0, 5, 0, 5)
+            o.BackgroundColor3 = i == 2 and Color3.new(1, 1, 1) or CY
+            o.BorderSizePixel = 0
+            o.Parent = card
+            corner(o, 3)
+            orbits[i] = {f = o, r = 43, a = i * 2.09, sp = 1.4}
         end
         local core = Instance.new("Frame")
         core.AnchorPoint = Vector2.new(0.5, 0.5)
         core.Position = UDim2.new(0, RX, 0, RY)
         core.Size = UDim2.new(0, 40, 0, 40)
-        core.BackgroundColor3 = Color3.fromRGB(10, 18, 32)
+        core.BackgroundColor3 = Color3.fromRGB(8, 16, 30)
         core.BorderSizePixel = 0
         core.Parent = card
         corner(core, 20)
         local coreStroke = Instance.new("UIStroke")
         coreStroke.Color = CY
-        coreStroke.Thickness = 1.5
+        coreStroke.Thickness = 1.6
         coreStroke.Parent = core
-        label(core, "M", 22, Enum.Font.GothamBlack, Color3.new(1, 1, 1), UDim2.new(0, 0, 0, 0), UDim2.new(1, 0, 1, 0), Enum.TextXAlignment.Center)
+        local logoM = label(core, "M", 20, Enum.Font.GothamBlack, Color3.new(1, 1, 1), UDim2.new(0, 0, 0, 0), UDim2.new(1, 0, 1, 0), CEN)
+        gradient(logoM, Color3.new(1, 1, 1), CY, 90)
 
-        -- tiêu đề + hiệu ứng glitch
-        local TX = 176
-        local ghostC = label(card, "MINH HUB", 36, Enum.Font.GothamBlack, CY, UDim2.new(0, TX, 0, 56), UDim2.new(0, 360, 0, 42))
-        local ghostR = label(card, "MINH HUB", 36, Enum.Font.GothamBlack, Color3.fromRGB(255, 70, 110), UDim2.new(0, TX, 0, 56), UDim2.new(0, 360, 0, 42))
-        ghostC.TextTransparency = 1
-        ghostR.TextTransparency = 1
-        local titleL = label(card, "MINH HUB", 36, Enum.Font.GothamBlack, Color3.new(1, 1, 1), UDim2.new(0, TX, 0, 56), UDim2.new(0, 360, 0, 42))
-        gradient(titleL, Color3.new(1, 1, 1), Color3.fromRGB(150, 215, 255), 90)
-        label(card, "// PREMIUM SCRIPT  ·  BLOX FRUITS", 12, MONO, CY, UDim2.new(0, TX, 0, 100), UDim2.new(0, 360, 0, 18))
+        -- tiêu đề hiện từng chữ + gợn sáng
+        local TITLE = "MINH HUB"
+        local letters = {}
+        do
+            local x = 118
+            for i = 1, #TITLE do
+                local ch = TITLE:sub(i, i)
+                local wch = ch == " " and 10 or 23
+                if ch ~= " " then
+                    local l = label(card, ch, 28, Enum.Font.GothamBlack, Color3.new(1, 1, 1),
+                        UDim2.new(0, x, 0, 56), UDim2.new(0, wch, 0, 34), CEN)
+                    l.TextTransparency = 1
+                    letters[#letters + 1] = l
+                    local idx = #letters
+                    task.delay(0.25 + idx * 0.06, function()
+                        pcall(function()
+                            Real:Create(l, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+                                {TextTransparency = 0, Position = UDim2.new(0, l.Position.X.Offset, 0, 46)}):Play()
+                        end)
+                    end)
+                end
+                x = x + wch
+            end
+        end
+        label(card, "PREMIUM SCRIPT · BLOX FRUITS", 10, MONO, CY, UDim2.new(0, 118, 0, 84), UDim2.new(0, 250, 0, 14))
         local dispName = "bạn"
         pcall(function() dispName = lp.DisplayName ~= "" and lp.DisplayName or lp.Name end)
-        local welcomeL = label(card, "Xin chào, " .. dispName .. "! Đang chuẩn bị script...", 12, Enum.Font.Gotham, MUTED,
-            UDim2.new(0, TX, 0, 122), UDim2.new(0, CW - TX - 24, 0, 18))
+        local welcomeL = label(card, "Xin chào, " .. dispName .. "! Đang chuẩn bị script...", 11, Enum.Font.Gotham, Color3.fromRGB(150, 175, 198),
+            UDim2.new(0, 118, 0, 100), UDim2.new(0, 250, 0, 16))
         welcomeL.TextTruncate = Enum.TextTruncate.AtEnd
-        local sysL = label(card, "SYS 0x000000  |  NET OK  |  UI SYNC", 11, MONO, Color3.fromRGB(90, 130, 160),
-            UDim2.new(0, TX, 0, 144), UDim2.new(0, CW - TX - 24, 0, 16))
 
-        -- khung terminal: 2 dòng cũ (mờ) + dòng hiện tại + phần trăm lớn
-        rect(card, 16, 172, CW - 32, 1, CY, 0.8)
-        local logOld2 = label(card, "", 12, MONO, Color3.fromRGB(70, 100, 125), UDim2.new(0, 28, 0, 178), UDim2.new(1, -190, 0, 16))
-        local logOld1 = label(card, "", 12, MONO, Color3.fromRGB(110, 150, 180), UDim2.new(0, 28, 0, 194), UDim2.new(1, -190, 0, 16))
-        label(card, ">", 12, MONO, CY, UDim2.new(0, 28, 0, 210), UDim2.new(0, 12, 0, 16))
-        local step = label(card, "Starting...", 12, MONO, WHITE, UDim2.new(0, 42, 0, 210), UDim2.new(1, -204, 0, 16))
-        logOld2.TextTruncate = Enum.TextTruncate.AtEnd
-        logOld1.TextTruncate = Enum.TextTruncate.AtEnd
+        -- dòng việc đang làm + phần trăm
+        local step = label(card, "Starting...", 11, MONO, Color3.fromRGB(235, 245, 255), UDim2.new(0, 16, 0, 140), UDim2.new(1, -100, 0, 18))
         step.TextTruncate = Enum.TextTruncate.AtEnd
-        local lastStep = "Starting..."
-        step:GetPropertyChangedSignal("Text"):Connect(function()
-            if step.Text == lastStep then return end
-            logOld2.Text = logOld1.Text
-            logOld1.Text = "✓ " .. lastStep
-            lastStep = step.Text
-        end)
-        local pctL = label(card, "0%", 34, MONO, Color3.new(1, 1, 1), UDim2.new(1, -170, 0, 180), UDim2.new(0, 142, 0, 44), RIGHT)
-        pctL.Font = Enum.Font.GothamBlack
+        local pctL = label(card, "0%", 20, Enum.Font.GothamBlack, Color3.new(1, 1, 1),
+            UDim2.new(1, -86, 0, 134), UDim2.new(0, 70, 0, 26), RIGHT)
         gradient(pctL, Color3.new(1, 1, 1), CY, 90)
 
-        -- thanh tiến trình dạng ô (segmented)
-        local SEG = 40
-        local segHolder = Instance.new("Frame")
-        segHolder.Position = UDim2.new(0, 28, 0, 238)
-        segHolder.Size = UDim2.new(1, -56, 0, 12)
-        segHolder.BackgroundTransparency = 1
-        segHolder.Parent = card
-        local segs = {}
-        for i = 1, SEG do
-            local sf = Instance.new("Frame")
-            sf.Position = UDim2.new((i - 1) / SEG, 0, 0, 0)
-            sf.Size = UDim2.new(1 / SEG, -3, 1, 0)
-            sf.BackgroundColor3 = Color3.fromRGB(24, 38, 56)
-            sf.BorderSizePixel = 0
-            sf.Parent = segHolder
-            segs[i] = {f = sf, lit = false}
+        local track = rect(card, 16, 164, CW - 32, 5, Color3.fromRGB(10, 18, 30), 0)
+        corner(track, 3)
+        local fill = Instance.new("Frame")
+        fill.Size = UDim2.new(0, 0, 1, 0)
+        fill.BackgroundColor3 = Color3.new(1, 1, 1)
+        fill.BorderSizePixel = 0
+        fill.ClipsDescendants = true
+        fill.Parent = track
+        corner(fill, 3)
+        gradient(fill, Color3.fromRGB(0, 120, 230), CY, 0)
+        local shimmer = Instance.new("Frame")
+        shimmer.Size = UDim2.new(0, 40, 1, 0)
+        shimmer.Position = UDim2.new(0, -40, 0, 0)
+        shimmer.BackgroundColor3 = Color3.new(1, 1, 1)
+        shimmer.BorderSizePixel = 0
+        shimmer.Parent = fill
+        do
+            local sg2 = Instance.new("UIGradient")
+            sg2.Transparency = NumberSequence.new({
+                NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.5, 0.35), NumberSequenceKeypoint.new(1, 1)})
+            sg2.Parent = shimmer
+        end
+        local tip = Instance.new("Frame")
+        tip.AnchorPoint = Vector2.new(0.5, 0.5)
+        tip.Size = UDim2.new(0, 11, 0, 11)
+        tip.Position = UDim2.new(0, 0, 0.5, 0)
+        tip.BackgroundColor3 = Color3.new(1, 1, 1)
+        tip.BorderSizePixel = 0
+        tip.ZIndex = 3
+        tip.Parent = track
+        corner(tip, 6)
+        do
+            local tsk = Instance.new("UIStroke")
+            tsk.Color = CY
+            tsk.Thickness = 2.5
+            tsk.Transparency = 0.4
+            tsk.Parent = tip
         end
 
-        -- 4 chặng
-        local stages = {
-            {"01 HỆ THỐNG", 20}, {"02 DỮ LIỆU", 45}, {"03 GIAO DIỆN", 75}, {"04 HOÀN TẤT", 100},
-        }
+        local stages = {{"HỆ THỐNG", 20}, {"DỮ LIỆU", 45}, {"GIAO DIỆN", 75}, {"HOÀN TẤT", 100}}
         local chips = {}
-        local colW = (CW - 56) / 4
+        local colW = (CW - 32) / 4
         for i, st in ipairs(stages) do
             local chip = Instance.new("Frame")
             chip.BackgroundTransparency = 1
-            chip.Position = UDim2.new(0, 28 + (i - 1) * colW, 0, 258)
-            chip.Size = UDim2.new(0, colW, 0, 20)
+            chip.Position = UDim2.new(0, 16 + (i - 1) * colW, 0, 178)
+            chip.Size = UDim2.new(0, colW, 0, 16)
             chip.Parent = card
-            local cd = rect(chip, 0, 7, 6, 6, MUTED, 0)
-            local cl = label(chip, st[1], 11, MONO, MUTED, UDim2.new(0, 12, 0, 0), UDim2.new(1, -12, 1, 0))
+            local cd = rect(chip, 0, 5, 5, 5, MUT, 0)
+            corner(cd, 3)
+            local cl = label(chip, st[1], 10, MONO, MUT, UDim2.new(0, 10, 0, 0), UDim2.new(1, -10, 1, 0))
             chips[i] = {chip = chip, dot = cd, lbl = cl, at = st[2], on = false}
         end
 
-        rect(card, 16, 288, CW - 32, 1, CY, 0.8)
-        local hintL = label(card, "Menu sẽ tự mở khi tải xong", 11, Enum.Font.Gotham, MUTED,
-            UDim2.new(0, 28, 1, -42), UDim2.new(1, -56, 0, 18), Enum.TextXAlignment.Center)
+        local hintL = label(card, "Menu sẽ tự mở khi tải xong", 10, Enum.Font.Gotham, Color3.fromRGB(130, 155, 178),
+            UDim2.new(0, 12, 1, -22), UDim2.new(1, -24, 0, 16), CEN)
         local TIPS = {
             "💡 Menu sẽ tự mở khi tải xong",
             "💡 Dùng Auto Farm Chest khi rảnh để gom Beli và rương",
             "💡 Nhấn nút Minh Hub để ẩn/hiện menu bất cứ lúc nào",
         }
+
+        -- ===== THÔNG BÁO SCRIPT: mỗi bước tải xong trượt vào góc phải dưới =====
+        local toastHolder = Instance.new("Frame")
+        toastHolder.AnchorPoint = Vector2.new(1, 1)
+        toastHolder.Position = UDim2.new(1, -16, 1, -16)
+        toastHolder.Size = UDim2.new(0, 290, 0, 200)
+        toastHolder.BackgroundTransparency = 1
+        toastHolder.Parent = gui
+        do
+            local ll = Instance.new("UIListLayout")
+            ll.SortOrder = Enum.SortOrder.LayoutOrder
+            ll.VerticalAlignment = Enum.VerticalAlignment.Bottom
+            ll.Padding = UDim.new(0, 6)
+            ll.Parent = toastHolder
+        end
+        local toastN = 0
+        local function pushToast(text, isDone)
+            pcall(function()
+                toastN = toastN + 1
+                local kids = {}
+                for _, c in ipairs(toastHolder:GetChildren()) do
+                    if c:IsA("Frame") then kids[#kids + 1] = c end
+                end
+                while #kids >= 4 do local old = table.remove(kids, 1) old:Destroy() end
+                local wrap = Instance.new("Frame")
+                wrap.Size = UDim2.new(1, 0, 0, 36)
+                wrap.BackgroundTransparency = 1
+                wrap.ClipsDescendants = false
+                wrap.LayoutOrder = toastN
+                wrap.Parent = toastHolder
+                local f = Instance.new("Frame")
+                f.Size = UDim2.new(1, 0, 1, 0)
+                f.Position = UDim2.new(1, 320, 0, 0)
+                f.BackgroundColor3 = Color3.fromRGB(8, 15, 27)
+                f.BackgroundTransparency = 0.05
+                f.BorderSizePixel = 0
+                f.Parent = wrap
+                corner(f, 5)
+                local fs = Instance.new("UIStroke")
+                fs.Color = isDone and Color3.fromRGB(110, 255, 190) or CY
+                fs.Thickness = 1
+                fs.Transparency = 0.2
+                fs.Parent = f
+                local bar = rect(f, 0, 0, 3, 36, isDone and Color3.fromRGB(110, 255, 190) or CY, 0)
+                label(f, isDone and "✔ SCRIPT READY" or "◆ SCRIPT", 9, MONO,
+                    isDone and Color3.fromRGB(110, 255, 190) or CY, UDim2.new(0, 12, 0, 3), UDim2.new(1, -20, 0, 12))
+                local msg = label(f, tostring(text), 11, MONO, Color3.fromRGB(225, 238, 250),
+                    UDim2.new(0, 12, 0, 16), UDim2.new(1, -20, 0, 16))
+                msg.TextTruncate = Enum.TextTruncate.AtEnd
+                Real:Create(f, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Position = UDim2.new(0, 0, 0, 0)}):Play()
+                task.delay(2.4, function()
+                    pcall(function()
+                        Real:Create(f, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {Position = UDim2.new(1, 320, 0, 0)}):Play()
+                        task.delay(0.35, function() pcall(function() wrap:Destroy() end) end)
+                    end)
+                end)
+            end)
+        end
+        local lastStep = "Starting..."
+        step:GetPropertyChangedSignal("Text"):Connect(function()
+            if step.Text == lastStep then return end
+            lastStep = step.Text
+            pushToast(step.Text, step.Text == "Hoàn tất!")
+        end)
 
         local t0 = os.clock()
         local target, shown, closed = 0, 0, false
@@ -371,54 +449,39 @@ do
             shown = shown + (target - shown) * math.min(1, dt * 2.5)
             if target - shown < 0.3 then shown = target end
             local frac = math.clamp(shown / 100, 0, 1)
+            fill.Size = UDim2.new(frac, 0, 1, 0)
+            tip.Position = UDim2.new(frac, 0, 0.5, 0)
             pctL.Text = string.format("%d%%", math.floor(shown + 0.5))
             timeL.Text = string.format("T+%.1fs", t)
-            if not _G.MinhHubGreeted then hintL.Text = TIPS[(math.floor(t / 2.2) % #TIPS) + 1] end
-            strokeGrad.Rotation = 45 + (t * 50) % 360
+            if not _G.MinhHubGreeted then hintL.Text = TIPS[(math.floor(t / 2.4) % #TIPS) + 1] end
+            shimmer.Position = UDim2.new(0, -40 + ((t % 1.2) / 1.2) * (fill.AbsoluteSize.X + 40), 0, 0)
+            strokeGrad.Rotation = 45 + (t * 60) % 360
             dot.BackgroundTransparency = 0.5 - 0.5 * math.sin(t * 6)
+            scan.Position = UDim2.new(0, 0, 0, -40 + ((t % 2.6) / 2.6) * (CH + 40))
             for i, g in ipairs(rings) do g.Rotation = (t * ringSpeed[i]) % 360 end
+            for i, h in ipairs(halos) do
+                h.BackgroundTransparency = 0.93 + i * 0.012 + 0.015 * math.sin(t * 2.6 - i * 0.6)
+            end
             for gi, gl in ipairs(glowLayers) do
-                gl.BackgroundTransparency = 0.93 + gi * 0.015 + 0.012 * math.sin(t * 2.2)
+                gl.BackgroundTransparency = 0.93 + gi * 0.016 + 0.012 * math.sin(t * 2)
             end
-            coreStroke.Thickness = 1.5 + 0.8 * (0.5 + 0.5 * math.sin(t * 4))
-            scan.Position = UDim2.new(0, 0, 0, -60 + ((t % 2.8) / 2.8) * (CH + 60))
-            -- glitch tiêu đề thỉnh thoảng
-            local gOn = (t % 3.1) < 0.12
-            local off = gOn and prng:NextInteger(2, 4) or 0
-            ghostC.TextTransparency = gOn and 0.45 or 1
-            ghostR.TextTransparency = gOn and 0.55 or 1
-            ghostC.Position = UDim2.new(0, TX - off, 0, 56)
-            ghostR.Position = UDim2.new(0, TX + off, 0, 56 + (gOn and 1 or 0))
-            -- dòng đọc số liệu giả lập
-            if math.floor(t * 8) ~= math.floor((t - dt) * 8) then
-                sysL.Text = string.format("SYS 0x%06X  |  NET OK  |  UI SYNC", prng:NextInteger(0, 0xFFFFFF))
+            for _, o in ipairs(orbits) do
+                local a = o.a + t * o.sp
+                o.f.Position = UDim2.new(0, RX + math.cos(a) * o.r, 0, RY + math.sin(a) * o.r)
             end
-            -- thanh ô
-            local litN = math.floor(frac * SEG + 0.5)
-            for i, s in ipairs(segs) do
-                local on = i <= litN
-                if on ~= s.lit then
-                    s.lit = on
-                    s.f.BackgroundColor3 = on and CY or Color3.fromRGB(24, 38, 56)
-                end
-                if on and i == litN and litN < SEG then
-                    s.f.BackgroundColor3 = Color3.fromRGB(255, 255, 255):Lerp(CY, 0.5 + 0.5 * math.sin(t * 12))
-                    s.lit = nil
-                end
+            coreStroke.Thickness = 1.6 + 0.8 * (0.5 + 0.5 * math.sin(t * 4))
+            for i, l in ipairs(letters) do
+                local k = 0.5 + 0.5 * math.sin(t * 3 - i * 0.55)
+                l.TextColor3 = Color3.new(1, 1, 1):Lerp(CY, k * 0.75)
             end
             for _, c in ipairs(chips) do
                 local on = shown >= c.at - 0.5
                 if on ~= c.on then
                     c.on = on
                     local ti = TweenInfo.new(0.25)
-                    Real:Create(c.dot, ti, {BackgroundColor3 = on and CY or MUTED}):Play()
-                    Real:Create(c.lbl, ti, {TextColor3 = on and Color3.new(1, 1, 1) or MUTED}):Play()
+                    Real:Create(c.dot, ti, {BackgroundColor3 = on and CY or MUT}):Play()
+                    Real:Create(c.lbl, ti, {TextColor3 = on and Color3.new(1, 1, 1) or MUT}):Play()
                 end
-            end
-            for _, pt in ipairs(particles) do
-                pt.y = pt.y - pt.v * dt
-                if pt.y < -0.05 then pt.y = 1.05 pt.x = prng:NextNumber() end
-                pt.f.Position = UDim2.new(pt.x, 0, pt.y, 0)
             end
         end)
 
@@ -440,13 +503,13 @@ do
                 f.BorderSizePixel = 0
                 f.ClipsDescendants = true
                 f.Parent = tg
-                corner(f, 14)
-                gradient(f, Color3.fromRGB(38, 44, 66), Color3.fromRGB(16, 17, 24), 60)
+                corner(f, 6)
+                gradient(f, Color3.fromRGB(12, 22, 38), Color3.fromRGB(5, 8, 14), 60)
                 local fs = Instance.new("UIStroke")
                 fs.Color = Color3.new(1, 1, 1)
                 fs.Thickness = 1.6
                 fs.Parent = f
-                gradient(fs, ACCENT_L, Color3.fromRGB(60, 64, 80), 60)
+                gradient(fs, Color3.fromRGB(70, 210, 255), Color3.fromRGB(24, 44, 70), 60)
 
                 -- vạch màu bên trái
                 local bar = Instance.new("Frame")
@@ -454,7 +517,7 @@ do
                 bar.BackgroundColor3 = Color3.new(1, 1, 1)
                 bar.BorderSizePixel = 0
                 bar.Parent = f
-                gradient(bar, ACCENT_L, Color3.fromRGB(44, 110, 230), 90)
+                gradient(bar, Color3.fromRGB(70, 210, 255), Color3.fromRGB(0, 120, 220), 90)
 
                 -- logo tròn
                 local lg = Instance.new("Frame")
@@ -465,15 +528,17 @@ do
                 lg.Parent = f
                 corner(lg, 24)
                 local lgs = Instance.new("UIStroke")
-                lgs.Color = ACCENT
+                lgs.Color = Color3.fromRGB(70, 210, 255)
                 lgs.Thickness = 2
                 lgs.Parent = lg
                 label(lg, "M", 24, Enum.Font.GothamBlack, ACCENT_L, UDim2.new(0, 0, 0, 0), UDim2.new(1, 0, 1, 0), Enum.TextXAlignment.Center)
 
-                label(f, "Chúc anh em chơi vui vẻ! 🎉", 16, Enum.Font.GothamBold, Color3.new(1, 1, 1),
-                    UDim2.new(0, 80, 0, 14), UDim2.new(1, -92, 0, 22))
-                local sub = label(f, "Minh Hub đã sẵn sàng • " .. dispName, 12, Enum.Font.Gotham, ACCENT_L,
-                    UDim2.new(0, 80, 0, 38), UDim2.new(1, -92, 0, 18))
+                label(f, "SYSTEM ONLINE ✓", 11, Enum.Font.Code, Color3.fromRGB(70, 210, 255),
+                    UDim2.new(0, 80, 0, 10), UDim2.new(1, -92, 0, 16))
+                label(f, "Chúc anh em chơi vui vẻ!", 15, Enum.Font.GothamBold, Color3.new(1, 1, 1),
+                    UDim2.new(0, 80, 0, 27), UDim2.new(1, -92, 0, 22))
+                local sub = label(f, "> Minh Hub sẵn sàng • " .. dispName, 11, Enum.Font.Code, Color3.fromRGB(110, 150, 180),
+                    UDim2.new(0, 80, 0, 52), UDim2.new(1, -92, 0, 18))
                 sub.TextTruncate = Enum.TextTruncate.AtEnd
 
                 -- thanh đếm ngược ở đáy
@@ -484,7 +549,7 @@ do
                 cd.BackgroundColor3 = Color3.new(1, 1, 1)
                 cd.BorderSizePixel = 0
                 cd.Parent = f
-                gradient(cd, Color3.fromRGB(44, 110, 230), ACCENT_L, 0)
+                gradient(cd, Color3.fromRGB(0, 120, 220), Color3.fromRGB(70, 210, 255), 0)
 
                 Real:Create(f, TweenInfo.new(0.55, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
                     {Position = UDim2.new(1, -24, 1, -28)}):Play()
@@ -2667,12 +2732,12 @@ function Q.ClaimCakeQuest()
 end
 
 -- UI HELPERS & THEME CONFIG (MINH HUB STYLE)
-local BANANA_YELLOW       = Color3.fromRGB(64, 140, 255)  -- xanh dương (điểm nhấn)
-local BANANA_DARK         = Color3.fromRGB(70, 74, 86)    -- viền cửa sổ
-local BANANA_BG           = Color3.fromRGB(22, 24, 30)
-local BANANA_SIDEBAR      = Color3.fromRGB(14, 15, 19)
-local BANANA_CARD         = Color3.fromRGB(44, 46, 54)
-local BANANA_CARD_BORDER  = Color3.fromRGB(72, 76, 88)
+local BANANA_YELLOW       = Color3.fromRGB(0, 170, 255)   -- xanh neon công nghệ (điểm nhấn)
+local BANANA_DARK         = Color3.fromRGB(30, 90, 130)   -- viền cửa sổ
+local BANANA_BG           = Color3.fromRGB(8, 12, 20)
+local BANANA_SIDEBAR      = Color3.fromRGB(5, 8, 14)
+local BANANA_CARD         = Color3.fromRGB(14, 22, 36)
+local BANANA_CARD_BORDER  = Color3.fromRGB(28, 62, 92)
 local BANANA_TEXT_ON      = Color3.fromRGB(255, 255, 255)
 
 local function addCorner(parent, radius)
@@ -2733,14 +2798,14 @@ toggleBtn.BackgroundColor3 = BANANA_SIDEBAR
 toggleBtn.Image = ""
 toggleBtn.ImageColor3 = BANANA_YELLOW
 toggleBtn.Parent = screenGui
-addCorner(toggleBtn, 28)
-addStroke(toggleBtn, BANANA_YELLOW, 2)
+addCorner(toggleBtn, 10)
+addStroke(toggleBtn, Color3.fromRGB(70, 210, 255), 1.6)
 do
     local bananaIcon = Instance.new("TextLabel")
     bananaIcon.Size = UDim2.new(1, 0, 1, 0)
     bananaIcon.BackgroundTransparency = 1
     bananaIcon.Text = "M"
-    bananaIcon.TextColor3 = BANANA_YELLOW
+    bananaIcon.TextColor3 = Color3.fromRGB(70, 210, 255)
     bananaIcon.TextSize = 28
     bananaIcon.Font = Enum.Font.GothamBlack
     bananaIcon.Active = false
@@ -2754,15 +2819,62 @@ mainFrame.Name = "MainFrame"
 mainFrame.Size = UDim2.new(0, MH.W, 0, MH.H)
 mainFrame.Position = UDim2.new(0.5, -MH.W / 2, 0.5, -MH.H / 2)
 mainFrame.BackgroundColor3 = BANANA_BG
-mainFrame.BackgroundTransparency = 0.12
+mainFrame.BackgroundTransparency = 0.06
 mainFrame.BorderSizePixel = 0
 mainFrame.ClipsDescendants = true
 mainFrame.Visible = true
 mainFrame.Parent = screenGui
-addCorner(mainFrame, 12)
+addCorner(mainFrame, 6)
 do
-    local winStroke = addStroke(mainFrame, BANANA_DARK, 1)
-    winStroke.Transparency = 0.35
+    local winStroke = addStroke(mainFrame, Color3.new(1, 1, 1), 1.2)
+    winStroke.Transparency = 0.1
+    local winGrad = Instance.new("UIGradient")
+    winGrad.Color = ColorSequence.new(Color3.fromRGB(70, 210, 255), Color3.fromRGB(24, 44, 70))
+    winGrad.Rotation = 45
+    winGrad.Parent = winStroke
+
+    pcall(function()
+    -- Nền kiểu HUD: lưới mờ + tia quét + 4 góc khung (nằm dưới mọi nội dung)
+    local function techRect(x, y, w, h, tr, name)
+        local f = Instance.new("Frame")
+        f.Name = name or "TechDeco"
+        f.Position = UDim2.new(0, x, 0, y)
+        f.Size = UDim2.new(0, w, 0, h)
+        f.BackgroundColor3 = Color3.fromRGB(70, 210, 255)
+        f.BackgroundTransparency = tr
+        f.BorderSizePixel = 0
+        f.Active = false
+        f.Parent = mainFrame
+        return f
+    end
+    for gx = 0, MH.W, 28 do techRect(gx, 0, 1, MH.H, 0.955, "TechGrid") end
+    for gy = 0, MH.H, 28 do techRect(0, gy, MH.W, 1, 0.955, "TechGrid") end
+    local scan = techRect(0, -50, MH.W, 50, 0, "TechScan")
+    do
+        local g = Instance.new("UIGradient")
+        g.Rotation = 90
+        g.Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.9, 0.95), NumberSequenceKeypoint.new(1, 0.8)})
+        g.Parent = scan
+    end
+    local function bracket(right, bottom)
+        local x0 = right and (MH.W - 6) or 6
+        local y0 = bottom and (MH.H - 6) or 6
+        techRect(right and x0 - 16 or x0, bottom and y0 - 2 or y0, 16, 2, 0.1, "TechBracket").ZIndex = 5
+        techRect(right and x0 - 2 or x0, bottom and y0 - 16 or y0, 2, 16, 0.1, "TechBracket").ZIndex = 5
+    end
+    bracket(false, true) bracket(true, true)
+    task.spawn(function()
+        local RS = game:GetService("RunService")
+        local t0 = os.clock()
+        while mainFrame.Parent do
+            local t = os.clock() - t0
+            scan.Position = UDim2.new(0, 0, 0, -50 + ((t % 4) / 4) * (MH.H + 50))
+            winGrad.Rotation = 45 + (t * 40) % 360
+            RS.Heartbeat:Wait()
+        end
+    end)
+    end)
 
     local menuScale = Instance.new("UIScale")
     menuScale.Name = "MenuScale"
@@ -2784,8 +2896,8 @@ do
     headLine.Name = "HeaderLine"
     headLine.Size = UDim2.new(1, 0, 0, 1)
     headLine.Position = UDim2.new(0, 0, 1, -1)
-    headLine.BackgroundColor3 = BANANA_CARD_BORDER
-    headLine.BackgroundTransparency = 0.5
+    headLine.BackgroundColor3 = Color3.fromRGB(70, 210, 255)
+    headLine.BackgroundTransparency = 0.7
     headLine.BorderSizePixel = 0
     headLine.Parent = header
 end
@@ -2794,11 +2906,11 @@ local headerTitle = Instance.new("TextLabel")
 headerTitle.Size = UDim2.new(1, -150, 1, 0)
 headerTitle.Position = UDim2.new(0, 12, 0, 0)
 headerTitle.BackgroundTransparency = 1
-headerTitle.Text = "Minh Hub Premium  <font color=\"#8A8F9E\">|  Blox Fruits  |</font>"
+headerTitle.Text = "MINH_HUB <font color=\"#46D2FF\">//</font> <font color=\"#6F8CA8\">BLOX_FRUITS // PREMIUM</font>"
 headerTitle.RichText = true
 headerTitle.TextColor3 = Color3.fromRGB(235, 237, 245)
 headerTitle.TextSize = 12
-headerTitle.Font = Enum.Font.GothamMedium
+headerTitle.Font = Enum.Font.Code
 headerTitle.TextXAlignment = Enum.TextXAlignment.Left
 headerTitle.Parent = header
 
@@ -2900,7 +3012,7 @@ pageTitle.BackgroundTransparency = 1
 pageTitle.Text = "Farm"
 pageTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
 pageTitle.TextSize = 20
-pageTitle.Font = Enum.Font.GothamBold
+pageTitle.Font = Enum.Font.GothamBlack
 pageTitle.TextXAlignment = Enum.TextXAlignment.Left
 pageTitle.Parent = mainFrame
 
@@ -2930,11 +3042,11 @@ local function createTab(tabName, iconText, isDefault)
     tabBtn.AutoButtonColor = false
     tabBtn.Text = tabLabel
     tabBtn.TextColor3 = isDefault and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(165, 168, 180)
-    tabBtn.Font = Enum.Font.GothamMedium
+    tabBtn.Font = Enum.Font.Code
     tabBtn.TextSize = 12
     tabBtn.TextXAlignment = Enum.TextXAlignment.Left
     tabBtn.Parent = sidebar
-    addCorner(tabBtn, 6)
+    addCorner(tabBtn, 3)
 
     local tabPad = Instance.new("UIPadding")
     tabPad.PaddingLeft = UDim.new(0, 34)
@@ -2960,7 +3072,7 @@ local function createTab(tabName, iconText, isDefault)
     indicator.Size = UDim2.new(0, 3, 0, 16)
     indicator.AnchorPoint = Vector2.new(0, 0.5)
     indicator.Position = UDim2.new(0, -10, 0.5, 0)
-    indicator.BackgroundColor3 = BANANA_YELLOW
+    indicator.BackgroundColor3 = Color3.fromRGB(70, 210, 255)
     indicator.BorderSizePixel = 0
     indicator.Visible = isDefault
     indicator.Parent = tabBtn
@@ -4601,6 +4713,99 @@ if World2 then
     end)
 end
 
+-- RAID HEIGHT SLIDER: bản đồng bộ của thanh Farm Height (kéo bên nào thì bên kia chạy theo)
+;(function()
+    local MAXH = 100
+    local startH = math.clamp(tonumber(farmDistanceHeight) or 35, 0, MAXH)
+
+    local card = Instance.new("Frame")
+    card.Name = "RaidHeightCard"
+    card.Size = UDim2.new(1, 0, 0, 56)
+    card.BackgroundColor3 = BANANA_CARD
+    card.LayoutOrder = 7
+    card.Parent = raidPage
+    addCorner(card, 8)
+    addStroke(card, BANANA_CARD_BORDER, 1.2)
+
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(0.65, 0, 0, 28)
+    title.Position = UDim2.new(0, 12, 0, 4)
+    title.BackgroundTransparency = 1
+    title.Text = "Farm Height (Flight Altitude)"
+    title.TextColor3 = Color3.fromRGB(255, 255, 255)
+    title.TextSize = 12
+    title.Font = Enum.Font.GothamBold
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.Parent = card
+
+    local box = Instance.new("TextBox")
+    box.Size = UDim2.new(0, 60, 0, 24)
+    box.Position = UDim2.new(1, -70, 0, 6)
+    box.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+    box.TextColor3 = Color3.fromRGB(255, 255, 255)
+    box.TextSize = 12
+    box.Font = Enum.Font.GothamBold
+    box.Text = tostring(startH)
+    box.ClearTextOnFocus = false
+    box.Parent = card
+    addCorner(box, 6)
+
+    local track = Instance.new("TextButton")
+    track.Size = UDim2.new(1, -24, 0, 8)
+    track.Position = UDim2.new(0, 12, 1, -14)
+    track.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+    track.BorderSizePixel = 0
+    track.Text = ""
+    track.AutoButtonColor = false
+    track.Parent = card
+    addCorner(track, 4)
+
+    local fill = Instance.new("Frame")
+    fill.Size = UDim2.new(startH / MAXH, 0, 1, 0)
+    fill.BackgroundColor3 = BANANA_YELLOW
+    fill.BorderSizePixel = 0
+    fill.Parent = track
+    addCorner(fill, 4)
+
+    local function showH(v)   -- chỉ cập nhật hiển thị (không ghi giá trị)
+        box.Text = tostring(v)
+        fill.Size = UDim2.new(math.clamp(v, 0, MAXH) / MAXH, 0, 1, 0)
+    end
+    _G.MHRaidHeightUI = showH
+    local function setH(v)
+        v = math.clamp(math.floor(v), 0, MAXH)
+        farmDistanceHeight = v
+        showH(v)
+        if _G.MHFarmHeightUI then pcall(_G.MHFarmHeightUI, v) end   -- đẩy sang thanh trong tab Config
+    end
+    local dragging = false
+    local function fromX(x)
+        local w = track.AbsoluteSize.X
+        if w <= 0 then return end
+        setH(math.clamp((x - track.AbsolutePosition.X) / w, 0, 1) * MAXH)
+    end
+    track.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            fromX(input.Position.X)
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            fromX(input.Position.X)
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+    box.FocusLost:Connect(function()
+        local n = tonumber(box.Text)
+        if n then setH(n) else box.Text = tostring(farmDistanceHeight) end
+    end)
+end)()
+
 _G.MinhHubLoad(38, "Loading Auto Raid...")
 -- =========================================================
 --   RAID: AUTO BUY CHIP / AUTO START RAID / AUTO FARM RAID
@@ -4679,7 +4884,7 @@ _G.MHRaidFixed = RAID_FIXED
 -- Độ cao đứng trên quái khi Raid: THEO thanh "Độ cao Farm" (trước đây cố định 35, kéo thanh không có tác dụng)
 function RAID_FIXED.height()
     -- Đọc trực tiếp giá trị thanh Farm Height; cho phép đặt 0 để farm sát mục tiêu.
-    local h = tonumber(farmDistanceHeight)
+    local h = tonumber(farmDistanceHeight)  -- dùng chung thanh Farm Height (đồng bộ với thanh trong tab Raid)
     if h == nil then h = tonumber(RAID_FIXED.lockHeight) or 35 end
     return math.clamp(h, 0, 100)
 end
@@ -6775,6 +6980,13 @@ local function updateSliderValue(inputX)
     farmDistanceHeight = val
     valueBox.Text = tostring(val)
     sliderFill.Size = UDim2.new(relativeX, 0, 1, 0)
+    if _G.MHRaidHeightUI then pcall(_G.MHRaidHeightUI, val) end   -- đồng bộ thanh trong tab Raid
+end
+
+-- Cho thanh trong tab Raid cập nhật hiển thị thanh này
+_G.MHFarmHeightUI = function(v)
+    valueBox.Text = tostring(v)
+    sliderFill.Size = UDim2.new(math.clamp(v, 0, 100) / 100, 0, 1, 0)
 end
 
 sliderTrack.InputBegan:Connect(function(input)
@@ -6803,6 +7015,7 @@ valueBox.FocusLost:Connect(function()
         farmDistanceHeight = num
         valueBox.Text = tostring(num)
         sliderFill.Size = UDim2.new(num / 100, 0, 1, 0)
+        if _G.MHRaidHeightUI then pcall(_G.MHRaidHeightUI, num) end
     else
         valueBox.Text = tostring(farmDistanceHeight)
     end
@@ -8199,9 +8412,9 @@ end
 _G.MHSpawn(function()
     local RF_DEBUG             = true
     local RF_COOLDOWN          = 7200 + 30
-    local RF_RETRY             = 60
-    local RF_RETRY_UNCONFIRMED = 300
-    local RF_CALL_TIMEOUT      = 6
+    local RF_RETRY             = 15
+    local RF_RETRY_UNCONFIRMED = 60
+    local RF_CALL_TIMEOUT      = 4
 
     -- Điểm tới dự phòng khi chưa thấy NPC (khu vực của NPC theo từng Sea; gần đúng)
     local NPC_AREA = {
@@ -8243,7 +8456,7 @@ _G.MHSpawn(function()
             done = true
         end)
         local t0 = tick()
-        while not done and tick() - t0 < RF_CALL_TIMEOUT do task.wait(0.1) end
+        while not done and tick() - t0 < RF_CALL_TIMEOUT do task.wait(0.02) end
         if not done then return false, "timeout " .. RF_CALL_TIMEOUT .. "s (server không trả lời)" end
         return ok, res
     end
@@ -8299,7 +8512,7 @@ _G.MHSpawn(function()
         repeat
             local ok, why = purchaseConfirmed(beliBefore, snapBefore)
             if ok then return true, why end
-            task.wait(0.1)
+            task.wait(0.03)
         until tick() >= deadline
         return false
     end
@@ -8313,11 +8526,10 @@ _G.MHSpawn(function()
         if commF then
             local okC, resC = invoke(commF, "Cousin", "Check")
             notes[#notes + 1] = "Check=" .. (okC and describe(resC) or "lỗi")
-            task.wait(0.05)
             local okB, resB = invoke(commF, "Cousin", "Buy")
             notes[#notes + 1] = "Buy=" .. (okB and describe(resB) or tostring(resB))
             setStatus("Remote:", table.concat(notes, " | "))
-            local ok, why = waitConfirm(beliBefore, snapBefore, 2.5)
+            local ok, why = waitConfirm(beliBefore, snapBefore, 1.5)
             if ok then return "success", why end
         else
             notes[#notes + 1] = "không thấy CommF_"
@@ -8331,7 +8543,7 @@ _G.MHSpawn(function()
             local okN, resN = invoke(gachaRF, {Context = "Purchase", BoxName = "ZiolesGacha"})
             notes[#notes + 1] = "Net=" .. (okN and describe(resN) or tostring(resN))
             setStatus("Remote:", table.concat(notes, " | "))
-            local ok, why = waitConfirm(beliBefore, snapBefore, 2.5)
+            local ok, why = waitConfirm(beliBefore, snapBefore, 1.5)
             if ok then return "success", why end
         end
 
@@ -8571,9 +8783,9 @@ _G.MHSpawn(function()
                 local area = NPC_AREA[seaIndex]
                 if area then
                     setStatus("Chưa thấy NPC - bay tới khu vực Zioles (Sea " .. seaIndex .. ")...")
-                    flyStraight(function() return area + Vector3.new(0, 25, 0) end, math.max(flySpeed or 190, 420), wanted, 15)
+                    flyStraight(function() return area + Vector3.new(0, 25, 0) end, math.max(flySpeed or 190, 700), wanted, 12)
                     for _ = 1, 6 do
-                        task.wait(0.25)
+                        task.wait(0.1)
                         npc = findGachaNPC()
                         if npc then break end
                     end
@@ -8591,11 +8803,11 @@ _G.MHSpawn(function()
             local arrived = flyStraight(function()
                 local p = npcPos()
                 return p and (p + Vector3.new(3, 0.5, 0)) or nil
-            end, math.max(flySpeed or 190, 420), wanted, 2.5)
+            end, math.max(flySpeed or 190, 700), wanted, 2.5)
             if not wanted() then detail = "Đã tắt"; return end
             if not arrived then detail = "Không bay tới được NPC"; return end
 
-            task.wait(0.2)
+            task.wait(0.05)
             for _, d in ipairs(npc:GetDescendants()) do
                 if d:IsA("ProximityPrompt") and typeof(fireproximityprompt) == "function" then
                     pcall(fireproximityprompt, d)
@@ -8616,7 +8828,7 @@ _G.MHSpawn(function()
                     break
                 end
 
-                if opt and tick() - lastOptClick > 0.6 then
+                if opt and tick() - lastOptClick > 0.3 then
                     setStatus("Chọn 'Random Fruit' trong hội thoại...")
                     clickButton(opt)
                     lastOptClick = tick()
@@ -8625,7 +8837,7 @@ _G.MHSpawn(function()
                     local p, r = npcPos(), LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
                     if p and r and (r.Position - p).Magnitude > 8 then r.CFrame = CFrame.new(p + Vector3.new(3, 0.5, 0)) end
                 end
-                task.wait(0.12)
+                task.wait(0.04)
             end
 
             if not clickedPurchase then
@@ -8639,14 +8851,14 @@ _G.MHSpawn(function()
             end
 
             -- 4) Chờ kết quả (có hoạt ảnh quay hộp)
-            local ok, why = waitConfirm(beliBefore, snapBefore, 6.5)
+            local ok, why = waitConfirm(beliBefore, snapBefore, 5)
             if ok then
                 result, detail = "success", why
             else
                 -- Nút vẫn còn -> bấm lại 1 lần bằng cách còn lại
                 local again = findButton(isPurchaseButton)
                 if again then
-                    task.wait(0.25)
+                    task.wait(0.1)
                     clickButton(again)
                     ok, why = waitConfirm(beliBefore, snapBefore, 4.5)
                 end
@@ -8655,7 +8867,7 @@ _G.MHSpawn(function()
             end
 
             -- 5) Đóng cửa sổ Gacha Box
-            task.wait(0.25)
+            task.wait(0.1)
             local close = findButton(isCloseButton)
             if close then clickButton(close) end
         end)
@@ -8676,7 +8888,7 @@ _G.MHSpawn(function()
             or not Q.SmartController.canRun("fruit")
     end
 
-    while task.wait(0.25) do
+    while task.wait(0.1) do
         if autoRandomFruitEnabled then
             if not wasEnabled then
                 wasEnabled = true
