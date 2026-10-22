@@ -4688,9 +4688,11 @@ end)
 createToggleFeature(raidPage, "AutoRaidToggle", "Auto Raid", "Automatically defeat mobs and travel between Raid islands", 4, autoRaidEnabled, function(state)
     autoRaidEnabled = state
     _G.Dungeon = state
-    -- TÍCH HỢP: bật Auto Raid = tự bật luôn Auto Buy Chip + Auto Start Raid (hiện rõ ô tick); tắt thì tắt cả 3.
+    -- Auto Raid là công tắc tổng: tự bật/tắt cả mua Chip và Start Raid.
+    -- Các cờ RaidAutoBuy/RaidAutoStart cũng giúp những vòng lặp khác nhận cùng trạng thái.
     autoBuyChipEnabled, _G.AutoBuyChip = state, state
     autoStartRaidEnabled, _G.StartRaid = state, state
+    _G.RaidAutoBuy, _G.RaidAutoStart = state, state
     if toggleUpdateFuncs["AutoBuyChipToggle"] then toggleUpdateFuncs["AutoBuyChipToggle"](state) end
     if toggleUpdateFuncs["AutoStartRaidToggle"] then toggleUpdateFuncs["AutoStartRaidToggle"](state) end
     if state then
@@ -4878,6 +4880,7 @@ local RAID_FIXED = {
     pendingStartPos = nil,    -- vị trí nhân vật lúc Start (để biết server đã dịch chuyển vào map Raid chưa)
     pendingStartAt = 0,
     masterWasOn = false,      -- trạng thái "Auto Raid" ở vòng điều khiển trước (đồng bộ Buy Chip / Start Raid)
+    autoBuyTriggerAt = 0,     -- chống tạo nhiều luồng mua chip khi controller đang chờ
 }
 _G.MHRaidFixed = RAID_FIXED
 
@@ -4997,17 +5000,14 @@ local function raidFarmEnabled()
     return (autoRaidEnabled or _G.Dungeon) and true or false
 end
 
--- Start Raid được phép chạy độc lập hoặc cùng với Auto Farm Raid.
+-- Auto Raid luôn bao gồm Auto Buy Chip + Auto Start Raid.
+-- Hai chức năng riêng vẫn có thể bật độc lập khi không bật công tắc tổng.
 local function raidStartEnabled()
-    -- FIX: bật Auto Raid mà không bật Auto Start Raid thì script chỉ đứng chờ và không bao giờ vào Raid.
-    -- Mặc định TÁCH RIÊNG (Auto Raid chỉ farm). Đặt _G.RaidAutoStart = true nếu muốn Auto Raid tự kèm Start Raid.
-    return (autoStartRaidEnabled or _G.StartRaid or (_G.RaidAutoStart == true and raidFarmEnabled())) and true or false
+    return (raidFarmEnabled() or autoStartRaidEnabled or _G.StartRaid == true or _G.RaidAutoStart == true) and true or false
 end
 
--- FIX: raid xong thì Special Microchip bị dùng hết; Auto Raid mà không bật Auto Buy Chip thì raid tiếp bị kẹt
--- ("No Special Microchip"). Mặc định TÁCH RIÊNG. Đặt _G.RaidAutoBuy = true nếu muốn Auto Raid tự kèm Auto Buy Chip.
 local function raidBuyEnabled()
-    return (autoBuyChipEnabled or _G.AutoBuyChip or (_G.RaidAutoBuy == true and raidFarmEnabled())) and true or false
+    return (raidFarmEnabled() or autoBuyChipEnabled or _G.AutoBuyChip == true or _G.RaidAutoBuy == true) and true or false
 end
 
 local function raidLog(...)
@@ -5210,6 +5210,15 @@ local function isRaidActive()
                 end
             end
             if not stillInRaidMap then RAID_FIXED.completed = false end
+        end
+        -- Nếu vẫn đứng trong map và người chơi khác kích hoạt Raid mới, Timer mới
+        -- là bằng chứng đủ để mở lại farm, kể cả khi cờ completed của lượt trước còn bật.
+        if RAID_FIXED.completed and timerOn then
+            RAID_FIXED.completed = false
+            RAID_FIXED.entered = false
+            RAID_FIXED.activeSince = nil
+            RAID_FIXED.currentIsland = 0
+            RAID_FIXED.lastStatus = "Phát hiện Raid mới (có thể do người khác kích hoạt) -> tiếp tục farm"
         end
         if RAID_FIXED.completed then
             RAID_FIXED.activeReason = nil
@@ -6221,6 +6230,8 @@ local function farmRaidIslands()
     local lastEquip, lastEnemySeen, heldIsland = 0, tick(), 0
     local curIsland = 0       -- đảo đang đánh (chỉ tăng, không bao giờ giảm)
     local clearedSince = nil  -- thời điểm đảo hiện tại hết quái
+    local lastProgressAt = tick()
+    local lastProgressIsland = 0
 
     -- Đảo nhỏ nhất đang tồn tại
     local function lowestIsland()
@@ -6238,6 +6249,25 @@ local function farmRaidIslands()
         return nil
     end
 
+    -- Xác định đảo Raid dựa trên VỊ TRÍ THỰC của nhân vật, không mặc định
+    -- người chơi luôn ở đảo thấp nhất. Hữu ích khi tham gia Raid do người khác mở.
+    local function getPlayerRaidIsland()
+        local root = getPlayerRoot()
+        if not root then return nil, math.huge end
+
+        local bestIsland, bestDistance = nil, math.huge
+        for i = 1, 8 do
+            local cf = getPivotPosition(getRaidIsland(i))
+            if cf then
+                local distance = (cf.Position - root.Position).Magnitude
+                if distance < bestDistance then
+                    bestIsland, bestDistance = i, distance
+                end
+            end
+        end
+        return bestIsland, bestDistance
+    end
+
     while alive() do
         -- Trang bị vũ khí
         if tick() - lastEquip >= 0.6 then
@@ -6249,31 +6279,68 @@ local function farmRaidIslands()
             end)
         end
 
-        -- Khởi tạo / đồng bộ đảo hiện tại (vd hồi sinh giữa chừng đang đứng gần đảo 3)
-        if curIsland == 0 or not getPivotPosition(getRaidIsland(curIsland)) then
+        -- Đồng bộ đảo thông minh:
+        -- 1) Khởi tạo ở đảo thấp nhất khi Raid mới bắt đầu.
+        -- 2) Không lùi về đảo 1 chỉ vì một Island instance tạm thời chưa được stream.
+        -- 3) Nếu hồi sinh/được dịch chuyển tới đảo cao hơn, cập nhật theo vị trí thật.
+        if curIsland == 0 then
             curIsland = lowestIsland() or 0
+        elseif not getPivotPosition(getRaidIsland(curIsland)) then
+            local higher = nextIsland(curIsland)
+            if higher then
+                curIsland = higher
+                clearedSince = nil
+                heldIsland = 0
+            end
         end
         do
-            local myRoot = getPlayerRoot()
-            if myRoot then
-                for i = 8, curIsland + 1, -1 do
-                    local cf = getPivotPosition(getRaidIsland(i))
-                    if cf and (cf.Position - myRoot.Position).Magnitude <= 450 then
-                        curIsland = i
-                        break
+            local playerIsland, playerIslandDistance = getPlayerRaidIsland()
+            -- Chỉ đổi đảo khi nhân vật ở đủ gần tâm một đảo thật; tránh nhận nhầm
+            -- khi đang bay giữa các đảo. Khi đã xác định được, vị trí nhân vật được
+            -- ưu tiên hơn chỉ số đảo lưu từ vòng lặp trước.
+            if playerIsland and playerIslandDistance <= 1100 and playerIsland ~= curIsland then
+                curIsland = playerIsland
+                clearedSince = nil
+                heldIsland = 0
+                lastProgressAt = tick()
+                lastProgressIsland = math.max(lastProgressIsland, curIsland)
+                RAID_FIXED.currentIsland = curIsland
+                RAID_FIXED.lastStatus = "Định vị nhân vật tại đảo Raid " .. tostring(curIsland)
+            end
+        end
+
+        -- Ưu tiên quái còn sống ở đảo hiện tại. Chỉ quét toàn map khi đảo hiện tại
+        -- đã trống đủ lâu và không còn đảo phía trước, tránh bay ngược về quái đảo cũ.
+        local enemy = curIsland > 0 and getRaidEnemy(curIsland) or getRaidEnemy(nil)
+        if enemy and not enemyAlive(enemy) then enemy = nil end
+        if not enemy and clearedSince and tick() - clearedSince >= 12 and not nextIsland(curIsland) then
+            local leftover = getRaidEnemy(nil)
+            if leftover and enemyAlive(leftover) then
+                enemy = leftover
+                -- Nếu quái sót thuộc đảo khác, cập nhật chỉ số theo vị trí đảo gần nhất.
+                local eRoot = leftover:FindFirstChild("HumanoidRootPart")
+                if eRoot then
+                    local bestIsland, bestDistance = nil, math.huge
+                    for i = curIsland, 8 do
+                        local cf = getPivotPosition(getRaidIsland(i))
+                        if cf then
+                            local d = (cf.Position - eRoot.Position).Magnitude
+                            if d < bestDistance then bestDistance, bestIsland = d, i end
+                        end
+                    end
+                    if bestIsland and bestDistance <= 900 and bestIsland > curIsland then
+                        curIsland = bestIsland
+                        clearedSince = nil
+                        heldIsland = 0
                     end
                 end
             end
         end
 
-        local enemy = curIsland > 0 and getRaidEnemy(curIsland) or getRaidEnemy(nil)
-        -- Đảo hiện tại trống > 25s và không có đảo kế -> dọn quái sót ở đảo khác
-        if not enemy and clearedSince and tick() - clearedSince > 10 and not nextIsland(curIsland) then
-            enemy = getRaidEnemy(nil)
-        end
-
-        if enemy and enemy:FindFirstChild("HumanoidRootPart") then
+        if enemy and enemy:FindFirstChild("HumanoidRootPart") and enemyAlive(enemy) then
             lastEnemySeen = tick()
+            lastProgressAt = tick()
+            lastProgressIsland = math.max(lastProgressIsland, curIsland)
             clearedSince = nil
             heldIsland = 0
             targetEnemy = enemy
@@ -6365,9 +6432,26 @@ local function farmRaidIslands()
 
             if nxt then
                 curIsland = nxt
+                lastProgressIsland = math.max(lastProgressIsland, curIsland)
+                lastProgressAt = tick()
                 heldIsland = 0
                 clearedSince = nil
                 RAID_FIXED.lastStatus = "Chuyển sang đảo Raid " .. tostring(curIsland)
+            elseif tick() - lastProgressAt > 35 then
+                -- Watchdog: nếu trạng thái đảo/quái bị stream lỗi, quét lại đảo cao hơn
+                -- thay vì đứng chờ vô hạn ở một Island đã biến mất.
+                local highest = getHighestRaidIsland()
+                if highest and highest > curIsland then
+                    curIsland = highest
+                    lastProgressIsland = math.max(lastProgressIsland, curIsland)
+                    lastProgressAt = tick()
+                    heldIsland = 0
+                    clearedSince = nil
+                    RAID_FIXED.lastStatus = "Tự đồng bộ lại Raid -> đảo " .. tostring(curIsland)
+                else
+                    lastProgressAt = tick()
+                    RAID_FIXED.lastStatus = "Đang quét lại quái Raid (chờ map cập nhật)"
+                end
             end
 
             local cf = curIsland > 0 and getPivotPosition(getRaidIsland(curIsland)) or nil
@@ -6472,15 +6556,32 @@ _G.MHSpawn(function()
                     if inRaidMapNow then
                         RAID_FIXED.lastStatus = "Raid đã farm xong/chờ rời map - chưa kích hoạt lượt mới"
                     else
-                        -- Chỉ Start khi Auto Start hoặc Auto Farm Raid đang bật và đang ở ngoài map Raid.
+                        -- Một luồng điều phối duy nhất: Auto Raid -> mua chip nếu thiếu -> Start khi đã có chip.
                         if startOn and not RAID_FIXED.starting and not RAID_FIXED.running then
                             if hasSpecialMicrochip() then
                                 local ok, msg = clickRaidSummon()
                                 if not ok and msg then
                                     RAID_FIXED.lastStatus = msg
                                 end
-                            elseif not raidBuyEnabled() then
-                                RAID_FIXED.lastStatus = "No Special Microchip (bật Auto Buy Chip)"
+                            elseif raidBuyEnabled() then
+                                -- Vòng Auto Buy riêng vẫn tồn tại; đây là cơ chế dự phòng nếu vòng đó bị chậm/kẹt.
+                                if not RAID_FIXED.buying and tick() >= (RAID_FIXED.autoBuyTriggerAt or 0) then
+                                    RAID_FIXED.autoBuyTriggerAt = tick() + 2
+                                    RAID_FIXED.lastStatus = "Auto Raid: chưa có Chip -> đang tự động mua..."
+                                    _G.MHSpawn(function()
+                                        local buyCallOk, bought, buyMsg = pcall(buySelectedRaidChip)
+                                        if not buyCallOk then
+                                            RAID_FIXED.lastStatus = "Lỗi Auto Buy Chip: " .. tostring(bought)
+                                            raidLog(RAID_FIXED.lastStatus)
+                                        elseif not bought and buyMsg then
+                                            RAID_FIXED.lastStatus = tostring(buyMsg)
+                                        elseif bought then
+                                            RAID_FIXED.lastStatus = "Đã có Chip -> chuẩn bị tự Start Raid"
+                                        end
+                                    end)
+                                end
+                            else
+                                RAID_FIXED.lastStatus = "No Special Microchip (bật Auto Buy Chip hoặc Auto Raid)"
                             end
                         end
                     end
@@ -7458,7 +7559,7 @@ createInputFeature(settingsPage, "Fast Attack Targets", maxAttackTargets, 13, fu
     maxAttackTargets = math.clamp(math.floor(tonumber(val) or 2), 1, 6)
 end)
 createToggleFeature(settingsPage, nil, "Fast Attack Players", "Fast-attack nearby players alongside mobs", 14, FA.playerEnabled, function(state) FA.playerEnabled = state end)
-createToggleFeature(settingsPage, "AutoClickGunToggle", "Auto Click Gun", "Use virtual mouse input to fire at mobs (select Weapon = Gun and enable Fast Attack)", 14, true, function(state)
+createToggleFeature(settingsPage, "AutoClickGunToggle", "Auto Click Gun", "Fire the gun via remote + tool activation (no screen click)", 14, true, function(state)
     FA.gunClickEnabled = state
 end)
 createToggleFeature(settingsPage, nil, "Auto Fast Attack", "Enable Fast Attack while farming and attack targets in range automatically", 12, FA.auto, function(state)
@@ -10659,6 +10760,19 @@ function FA.findGunNetRemotes()
             end
         end
     end)
+    if #list == 0 then
+        pcall(function()
+            for _, d in ipairs(ReplicatedStorage:GetDescendants()) do
+                if d:IsA("RemoteEvent") then
+                    local n = string.lower(d.Name)
+                    if (string.find(n, "shootgun", 1, true) or string.find(n, "gunshoot", 1, true)
+                        or string.find(n, "gunevent", 1, true)) and not string.find(n, "register", 1, true) then
+                        list[#list + 1] = d
+                    end
+                end
+            end
+        end)
+    end
     FA.gunNet = list
     return list
 end
@@ -10750,7 +10864,9 @@ function FA.gunM1(tool, hrp, targets)
     -- 3) Bắn bằng chính script của súng (tool:Activate) + aim ảo về phía quái
     --    -> đúng đường bắn thật của game (đủ tham số/ kiểm tra hợp lệ), không click màn hình.
     local nativeFired = false
-    if FA.installGunAim() then
+    FA._gunRemoteAt = (netCount + toolCount > 0) and os.clock() or FA._gunRemoteAt
+    -- Đã bắn bằng remote thì KHÔNG Activate nữa: Activate làm súng vào trạng thái "reloading" và bắn lệch.
+    if netCount + toolCount == 0 and FA.installGunAim() then
         FA._aimPos, FA._aimPart, FA._aimUntil = pos, first.hrp, os.clock() + 0.35
         if os.clock() - (FA._gunActAt or 0) >= 0.1 then
             FA._gunActAt = os.clock()
@@ -10759,6 +10875,7 @@ function FA.gunM1(tool, hrp, targets)
         if nativeFired then fired = true end
     end
 
+    FA.gunLast = string.format("%s | net=%d tool=%d native=%s hook=%s fired=%s", tool.Name, netCount, toolCount, tostring(nativeFired), tostring(FA._gunAimHook), tostring(fired))
     -- Chẩn đoán 1 lần cho mỗi súng
     if not FA.gunDiag[tool.Name] then
         FA.gunDiag[tool.Name] = true
@@ -10781,6 +10898,7 @@ end
 FA.gunClickEnabled = true
 function FA.gunClick(tool, targets)
     if not FA.gunClickEnabled or not FA.isGunTool(tool) then return false end
+    if os.clock() - (FA._gunRemoteAt or 0) < 0.5 then return true end   -- remote đang bắn tốt, khỏi Activate
     if os.clock() - (FA._gunClickAt or 0) < 0.12 then return true end
     local first = targets and targets[1]
     if not first or not first.hrp or not first.hrp.Parent then return false end
@@ -10792,19 +10910,9 @@ function FA.gunClick(tool, targets)
         FA._aimPos, FA._aimPart, FA._aimUntil = first.hrp.Position, first.hrp, os.clock() + 0.35
     end
 
-    -- Click tại vị trí con trỏ hiện tại, không gửi MouseMove
-    local clicked = false
-    if okVIM and VirtualInputManager then
-        clicked = pcall(function()
-            local loc = UserInputService:GetMouseLocation()
-            VirtualInputManager:SendMouseButtonEvent(loc.X, loc.Y, 0, true, game, 0)
-            task.wait(0.03)
-            VirtualInputManager:SendMouseButtonEvent(loc.X, loc.Y, 0, false, game, 0)
-        end)
-    end
-    if not clicked then
-        clicked = pcall(function() tool:Activate() end)
-    end
+    -- KHÔNG click màn hình (kiểu Banana): kích hoạt tool trực tiếp (tool:Activate) + aim ảo trỏ vào quái.
+    -- Con trỏ/HUD không bị chạm; remote bắn đã được FA.gunM1 gửi riêng ở mỗi nhịp.
+    local clicked = pcall(function() tool:Activate() end)
     return clicked
 end
 
@@ -14059,6 +14167,194 @@ function Q.UI3D.run()
     if not okSkin then warn("[UI3D] Bỏ qua giao diện 3D do lỗi:", errSkin) end
 end
 Q.UI3D.run()
+
+-- =========================================================
+-- TAB SKILLS: dropdown "Select Skills <nhóm>:" – chọn phím skill tự bấm theo từng nhóm vũ khí
+--   Melee: Z X C | Sword: Z X | Gun: Z X | Blox Fruit: Z X C V F
+-- =========================================================
+do
+    local okSk, errSk = pcall(function()
+        local skillsPage = createTab("Skills", "", false)
+        local GROUPS = {
+            {name = "Melee",      label = "Melee",      keys = {"Z", "X", "C"}},
+            {name = "Sword",      label = "Sword",      keys = {"Z", "X"}},
+            {name = "Gun",        label = "Gun",        keys = {"Z", "X"}},
+            {name = "Blox Fruit", label = "Blox Fruit", keys = {"Z", "X", "C", "V", "F"}},
+        }
+        local cfg, cooldown = {}, {}
+        for _, G in ipairs(GROUPS) do
+            cfg[G.name] = {}
+            for _, k in ipairs(G.keys) do cfg[G.name][k] = false end
+        end
+        _G.MHSkills = cfg
+
+        for gi, G in ipairs(GROUPS) do
+            local holder = Instance.new("Frame")
+            holder.Size = UDim2.new(1, -4, 0, 0)
+            holder.AutomaticSize = Enum.AutomaticSize.Y
+            holder.BackgroundTransparency = 1
+            holder.LayoutOrder = gi
+            holder.Parent = skillsPage
+            local lay = Instance.new("UIListLayout")
+            lay.SortOrder = Enum.SortOrder.LayoutOrder
+            lay.Padding = UDim.new(0, 3)
+            lay.Parent = holder
+
+            local header = Instance.new("TextButton")
+            header.Size = UDim2.new(1, 0, 0, 32)
+            header.BackgroundColor3 = Color3.fromRGB(25, 27, 34)
+            header.BackgroundTransparency = 0.08
+            header.BorderSizePixel = 0
+            header.AutoButtonColor = false
+            header.Text = ""
+            header.LayoutOrder = 1
+            header.Parent = holder
+            addCorner(header, 6)
+            addStroke(header, Color3.fromRGB(65, 68, 80), 1)
+
+            local lbl = Instance.new("TextLabel")
+            lbl.Size = UDim2.new(1, -40, 1, 0)
+            lbl.Position = UDim2.new(0, 10, 0, 0)
+            lbl.BackgroundTransparency = 1
+            lbl.TextColor3 = Color3.fromRGB(205, 208, 218)
+            lbl.TextSize = 12
+            lbl.Font = Enum.Font.GothamBold
+            lbl.TextXAlignment = Enum.TextXAlignment.Left
+            lbl.TextTruncate = Enum.TextTruncate.AtEnd
+            lbl.Parent = header
+
+            local arrow = Instance.new("TextLabel")
+            arrow.Size = UDim2.new(0, 24, 1, 0)
+            arrow.Position = UDim2.new(1, -28, 0, 0)
+            arrow.BackgroundTransparency = 1
+            arrow.Text = ">"
+            arrow.TextColor3 = Color3.fromRGB(235, 235, 240)
+            arrow.TextSize = 16
+            arrow.Font = Enum.Font.GothamBold
+            arrow.Parent = header
+
+            local list = Instance.new("Frame")
+            list.Size = UDim2.new(1, 0, 0, 0)
+            list.AutomaticSize = Enum.AutomaticSize.Y
+            list.BackgroundTransparency = 1
+            list.LayoutOrder = 2
+            list.Visible = false
+            list.Parent = holder
+            local ll = Instance.new("UIListLayout")
+            ll.SortOrder = Enum.SortOrder.LayoutOrder
+            ll.Padding = UDim.new(0, 3)
+            ll.Parent = list
+
+            local function refreshLabel()
+                local on = {}
+                for _, k in ipairs(G.keys) do if cfg[G.name][k] then on[#on + 1] = k end end
+                lbl.Text = "Select Skills " .. G.label .. ": " .. table.concat(on, ", ")
+            end
+            refreshLabel()
+
+            for ki, k in ipairs(G.keys) do
+                local b = Instance.new("TextButton")
+                b.Size = UDim2.new(1, -12, 0, 28)
+                b.BorderSizePixel = 0
+                b.AutoButtonColor = false
+                b.TextSize = 11
+                b.Font = Enum.Font.GothamBold
+                b.TextXAlignment = Enum.TextXAlignment.Left
+                b.LayoutOrder = ki
+                b.Parent = list
+                addCorner(b, 5)
+                local pad = Instance.new("UIPadding")
+                pad.PaddingLeft = UDim.new(0, 12)
+                pad.Parent = b
+                local function refresh()
+                    local on = cfg[G.name][k]
+                    b.Text = (on and "✓  " or "□  ") .. k .. "  (" .. (on and "ON" or "OFF") .. ")"
+                    b.BackgroundColor3 = on and Color3.fromRGB(55, 95, 55) or Color3.fromRGB(38, 40, 49)
+                    b.TextColor3 = on and Color3.fromRGB(220, 255, 220) or Color3.fromRGB(205, 208, 218)
+                end
+                refresh()
+                b.MouseButton1Click:Connect(function()
+                    cfg[G.name][k] = not cfg[G.name][k]
+                    refresh()
+                    refreshLabel()
+                end)
+            end
+
+            header.MouseButton1Click:Connect(function()
+                list.Visible = not list.Visible
+                arrow.Rotation = list.Visible and 90 or 0
+            end)
+        end
+
+        -- dòng trạng thái để biết vì sao chưa bấm
+        local stLbl = Instance.new("TextLabel")
+        stLbl.Size = UDim2.new(1, -4, 0, 52)
+        stLbl.BackgroundTransparency = 1
+        stLbl.LayoutOrder = 0
+        stLbl.TextWrapped = true
+        stLbl.TextColor3 = Color3.fromRGB(170, 175, 190)
+        stLbl.TextSize = 11
+        stLbl.Font = Enum.Font.GothamMedium
+        stLbl.TextXAlignment = Enum.TextXAlignment.Left
+        stLbl.TextYAlignment = Enum.TextYAlignment.Top
+        stLbl.Text = "Status: waiting..."
+        stLbl.Parent = skillsPage
+
+        local KEYCODE = {Z = Enum.KeyCode.Z, X = Enum.KeyCode.X, C = Enum.KeyCode.C, V = Enum.KeyCode.V, F = Enum.KeyCode.F}
+        local function press(k)
+            local sent = false
+            if okVIM and VirtualInputManager then
+                sent = pcall(function()
+                    VirtualInputManager:SendKeyEvent(true, KEYCODE[k], false, game)
+                    task.wait(0.06)
+                    VirtualInputManager:SendKeyEvent(false, KEYCODE[k], false, game)
+                end)
+            end
+            if not sent and typeof(keypress) == "function" and typeof(keyrelease) == "function" then
+                local code = string.byte(k)
+                pcall(function() keypress(code); task.wait(0.06); keyrelease(code) end)
+            end
+        end
+        _G.MHSpawn(function()
+            while task.wait(0.15) do
+                local ok, err = pcall(function()
+                    local anyOn = false
+                    for _, G in ipairs(GROUPS) do
+                        for _, k in ipairs(G.keys) do if cfg[G.name][k] then anyOn = true end end
+                    end
+                    if not anyOn then stLbl.Text = "Status: no key selected (open a dropdown and tick Z/X/C...)"; return end
+                    local hasTarget = (targetEnemy ~= nil and targetEnemy ~= false)
+                    if typeof(targetEnemy) == "Instance" and not targetEnemy.Parent then hasTarget = false end
+                    if not hasTarget then stLbl.Text = "Status: no farm target (turn on Auto Farm first)"; return end
+                    local char = LocalPlayer.Character
+                    local tool = char and char:FindFirstChildOfClass("Tool")
+                    if not tool then stLbl.Text = "Status: no weapon equipped"; return end
+                    local grp
+                    for _, G in ipairs(GROUPS) do
+                        if isMatchingWeaponType(tool, G.name) then grp = G; break end
+                    end
+                    if not grp then stLbl.Text = "Status: unknown weapon type: " .. tool.Name; return end
+                    local keysOn = {}
+                    for _, k in ipairs(grp.keys) do if cfg[grp.name][k] then keysOn[#keysOn + 1] = k end end
+                    if #keysOn == 0 then stLbl.Text = "Status: holding " .. tool.Name .. " (" .. grp.name .. ") - no key ticked for this group"; return end
+                    stLbl.Text = "Status: " .. tool.Name .. " (" .. grp.name .. ") -> " .. table.concat(keysOn, ", ")
+                    for _, k in ipairs(keysOn) do
+                        if tick() - (cooldown[grp.name .. k] or 0) >= 1.5 then
+                            cooldown[grp.name .. k] = tick()
+                            press(k)
+                            task.wait(0.15)
+                        end
+                    end
+                end)
+                if not ok then stLbl.Text = "Status: error " .. tostring(err) end
+                if FA and FA.gunLast then stLbl.Text = stLbl.Text .. "\nGun: " .. FA.gunLast end
+            end
+        end)
+
+        tabs["Skills"].Button.LayoutOrder = 9   -- nằm sau tab ESP
+    end)
+    if not okSk then warn("[Skills] Lỗi tạo tab Skills:", errSk) end
+end
 
 _G.MinhHubLoad(97, "Loading Status tab...")
 -- =========================================================
