@@ -633,6 +633,7 @@ _G.MinhHubLoad(5, "Loading stable flight system...")
 --  * Tween UI (GUI) vẫn dùng TweenService thật như cũ
 -- =========================================================
 _G.__FlyN = 0
+local Q -- forward declaration: shared Sea 3 portal controller is initialized below
 local TweenService
 do
     local Real = game:GetService("TweenService")
@@ -642,6 +643,7 @@ do
         local self = { PlaybackState = Enum.PlaybackState.Begin }
         local handlers = {}
         local conn
+        local counted = false
 
         self.Completed = {
             Connect = function(_, fn)
@@ -654,6 +656,9 @@ do
             if conn then
                 conn:Disconnect()
                 conn = nil
+            end
+            if counted then
+                counted = false
                 _G.__FlyN = math.max(0, (_G.__FlyN or 0) - 1)
             end
             self.PlaybackState = state
@@ -672,10 +677,37 @@ do
             if self.PlaybackState == Enum.PlaybackState.Playing then return end
             self.PlaybackState = Enum.PlaybackState.Playing
             _G.__FlyN = (_G.__FlyN or 0) + 1
+            counted = true
 
             local pos = hrp.Position
             local dist0 = (goalCF.Position - pos).Magnitude
             local speed = math.clamp(dist0 / math.max(info.Time, 0.05), 40, 600)
+
+            -- Shared route hook: Auto Level/Bones/Cake/Boss/Material/Chest,
+            -- raid, Pirate Raid and melee movement all use this same tween layer.
+            -- The controller only returns a route when the current and target islands
+            -- are connected by a portal that has been found and appears active.
+            local portalAPI = Q and Q.ThirdSeaPortals
+            if portalAPI and not _G.__MHThirdSeaPortalBypass then
+                local okPlan, plan = pcall(function()
+                    return portalAPI.makePlan(hrp.Position, goalCF.Position)
+                end)
+                if okPlan and plan then
+                    self.__MHPortalRouted = true -- cho bộ chờ bên ngoài thêm thời gian cho tuyến 2 cổng
+                    _G.MHSpawn(function()
+                        local okRoute, reached = pcall(function()
+                            return portalAPI.execute(hrp, goalCF, speed, function()
+                                return self.PlaybackState == Enum.PlaybackState.Playing
+                            end, plan)
+                        end)
+                        self.__MHPortalRouted = false
+                        if self.PlaybackState == Enum.PlaybackState.Playing then
+                            finish(okRoute and reached == true and Enum.PlaybackState.Completed or Enum.PlaybackState.Cancelled)
+                        end
+                    end)
+                    return
+                end
+            end
 
             conn = RunService.Heartbeat:Connect(function(dt)
                 if not hrp.Parent then finish(Enum.PlaybackState.Cancelled) return end
@@ -959,6 +991,7 @@ _G.PirateRaidRadius    = 900     -- bán kính (studs) quanh Castle on the Sea t
 _G.PirateRaidSpeed     = 300     -- tốc độ bay thẳng tới hải tặc (studs/giây)
 _G.PirateRaidAutoTravel = true   -- nghe thông báo "Pirates have been spotted..." rồi bay sẵn tới lâu đài
 _G.PirateRaidDebug     = true
+_G.MinhHubThirdSeaPortalStatus = "Chưa quét portal Sea 3" -- cập nhật trạng thái mở/khóa khi các chức năng cần di chuyển
 _G.RaidKillAura = true   -- Kill Aura khi farm Raid ở đảo 4-5
 _G.RaidKillAuraIsland = 4  -- từ đảo này trở đi dùng Kill Aura
 _G.RaidKillAuraReset = true  -- true: reset (đặt máu = 0 + BreakJoints) quái Raid; false: chỉ gom & đánh
@@ -968,7 +1001,7 @@ local autoBuyChipEnabled    = false
 local autoStartRaidEnabled  = false
 local selectedRaidChip      = "Flame"
 
-local farmDistanceHeight    = 35
+local farmDistanceHeight    = 20
 local flySpeed              = 190 -- tốc độ bay mặc định 190 studs/giây
 local bringRadius           = 250
 local selectedWeapon        = "Melee"
@@ -1013,7 +1046,8 @@ local function flyTo(targetCFrame, speed, keepGoing)
         tw:Play()
         local t0 = tick()
         -- chờ có giới hạn thời gian thay vì Completed:Wait() (dễ treo vĩnh viễn)
-        while tw.PlaybackState == Enum.PlaybackState.Playing and tick() - t0 < duration + 1.5 do
+        local waitAllowance = tw.__MHPortalRouted and 30 or 1.5
+        while tw.PlaybackState == Enum.PlaybackState.Playing and tick() - t0 < duration + waitAllowance do
             if keepGoing and not keepGoing() then break end
             task.wait()
         end
@@ -1140,7 +1174,7 @@ do
             {375, "FishmanQuest",   1, "Fishman Warrior",     V(61403.79, 29.94, 1630.02),    V(60833.39, 24.93, 1391.36)},
             {400, "FishmanQuest",   2, "Fishman Commando",    V(61403.79, 29.94, 1630.02),    V(61925.99, 24.93, 1346.67)},
             -- Sea 1 Skylands: tọa độ theo cấu hình Auto Level được cung cấp.
-            {450, "SkyExp1Quest",   1, "God's Guard",         V(-4721.88867, 843.874695, -1949.96643), V(-4710.04297, 845.27698, -1927.30798)},
+            {450, "SkyExp1Quest",   1, "God's Guard",         V(-4313.19, 1087.41, -561.19), V(-4244.48, 1095.64, -392.41)},
             {475, "SkyExp1Quest",   2, "Shanda",              V(-5954.92, 5474.16, 2087.68), V(-5959.89, 5469.16, 1846.12)},
             {525, "SkyExp2Quest",   1, "Royal Squad",         V(-7028.59, 5596.90, 1353.15), V(-6797.82, 5549.47, 1251.23)},
             {550, "SkyExp2Quest",   2, "Royal Soldier",       V(-7028.59, 5596.90, 1353.15), V(-7089.96, 5540.58, 841.68)},
@@ -1309,7 +1343,7 @@ end
 --   (3) dự phòng: tự đếm số quái đã giết từ lúc nhận quest, đủ số mới nhận tiếp
 
 -- (Gom biến vào bảng Q vì Luau giới hạn 200 biến local ở cấp cao nhất)
-local Q = {
+Q = {
     QUEST_DEBUG = true,          -- in log [Quest] ra console (F9)
     QUEST_HIDE_GRACE = 0.5,      -- quest vừa xong -> chờ rồi nhận quest mới
     QUEST_LOST_WAIT = 10,        -- GUI tắt khi CHƯA đánh đủ -> chờ lâu hơn
@@ -1792,6 +1826,704 @@ function Q.getStableCursedShipTargetSide(pos, sourceKey, forceInside)
     end
 
     return state.stable, true
+end
+
+-- =========================================================
+-- SEA 3 SMART PORTAL ROUTER
+-- Improved: verify the local entry before flying to it, recheck cached state, confirm
+-- each teleport, rescan at intermediate hubs, and allow Raid flight time for routed trips.
+-- Tuyến hỗ trợ:
+--   Castle on the Sea <-> Mansion / Floating Turtle
+--   Castle on the Sea <-> Hydra Island
+-- Floating Turtle <-> Hydra Island sẽ đi qua Castle on the Sea.
+-- Quan trọng: nếu không quét thấy portal hoạt động / có dấu hiệu bị khóa,
+-- makePlan trả nil và hệ thống bay bình thường, không bay tới cổng.
+-- =========================================================
+Q.ThirdSeaPortals = Q.ThirdSeaPortals or {}
+Q.ThirdSeaPortals.cache = Q.ThirdSeaPortals.cache or {}
+Q.ThirdSeaPortals.deniedUntil = Q.ThirdSeaPortals.deniedUntil or {}
+Q.ThirdSeaPortals.status = Q.ThirdSeaPortals.status or "Idle"
+Q.ThirdSeaPortals.lastDenialScan = 0
+Q.ThirdSeaPortals.denialSeenUntil = Q.ThirdSeaPortals.denialSeenUntil or 0
+
+Q.ThirdSeaPortals.hubs = {
+    ["Castle on the Sea"] = {
+        center = Vector3.new(-5017.4, 314.8, -2823.0),
+        portal = Vector3.new(-5092.0, 315.0, -3130.0),
+        radius = 1450,
+    },
+    ["Floating Turtle"] = {
+        center = Vector3.new(-13274.5, 531.8, -7579.2),
+        portal = Vector3.new(-12471.2, 374.9, -7551.7),
+        radius = 1,
+    },
+    ["Hydra Island"] = {
+        center = Vector3.new(5228.9, 603.9, 345.0),
+        portal = Vector3.new(5756.0, 610.0, -282.0),
+        radius = 1,
+    },
+}
+
+function Q.ThirdSeaPortals.tp3Lower(value)
+    return string.lower(tostring(value or ""))
+end
+
+function Q.ThirdSeaPortals.tp3DistanceXZ(a, b)
+    local dx, dz = a.X - b.X, a.Z - b.Z
+    return math.sqrt(dx * dx + dz * dz)
+end
+
+function Q.ThirdSeaPortals.classify(pos)
+    if not World3 or not pos then return nil end
+    -- Bounding boxes deliberately exclude Deep Forest, Great Tree and Sea of Treats;
+    -- this router only handles the three portal-connected hubs requested.
+    if pos.X >= -6800 and pos.X <= -3900 and pos.Z >= -4750 and pos.Z <= -1650 then
+        return "Castle on the Sea"
+    end
+    -- Bao phủ cả rìa khu Floating Turtle nơi một số NPC farm level xuất hiện.
+    if pos.X >= -16000 and pos.X <= -10600 and pos.Z >= -11200 and pos.Z <= -4900 then
+        return "Floating Turtle"
+    end
+    if pos.X >= 3650 and pos.X <= 7600 and pos.Z >= -2100 and pos.Z <= 2300 then
+        return "Hydra Island"
+    end
+    return nil
+end
+
+function Q.ThirdSeaPortals.tp3ValueIsTrue(value)
+    if value == true or value == 1 then return true end
+    if type(value) == "string" then
+        local s = Q.ThirdSeaPortals.tp3Lower(value)
+        return s == "true" or s == "yes" or s == "1" or s == "unlocked" or s == "defeated"
+    end
+    return false
+end
+
+function Q.ThirdSeaPortals.tp3ReadUnlockFlag()
+    -- Optional override for executors/builds that expose the game's saved unlock state.
+    if _G.MinhHubThirdSeaPortalsUnlocked ~= nil then
+        return _G.MinhHubThirdSeaPortalsUnlocked == true
+    end
+    local roots = {LocalPlayer}
+    local data = LocalPlayer and LocalPlayer:FindFirstChild("Data")
+    if data then roots[#roots + 1] = data end
+    local positive, negative = false, false
+    local function inspectNameValue(name, value)
+        local n = Q.ThirdSeaPortals.tp3Lower(name):gsub("[^%w]", "")
+        local relevant = (string.find(n, "ripindra", 1, true) ~= nil and
+                (string.find(n, "defeat", 1, true) ~= nil or string.find(n, "kill", 1, true) ~= nil or string.find(n, "portal", 1, true) ~= nil))
+            or string.find(n, "thirdseaportalunlocked", 1, true) ~= nil
+            or string.find(n, "hydraportalunlocked", 1, true) ~= nil
+            or string.find(n, "mansionportalunlocked", 1, true) ~= nil
+        if not relevant then return end
+        if Q.ThirdSeaPortals.tp3ValueIsTrue(value) then positive = true else negative = true end
+    end
+    for _, root in ipairs(roots) do
+        if root then
+            local okA, attrs = pcall(function() return root:GetAttributes() end)
+            if okA and type(attrs) == "table" then
+                for name, value in pairs(attrs) do inspectNameValue(name, value) end
+            end
+            local okD, desc = pcall(function() return root:GetDescendants() end)
+            if okD then
+                for _, obj in ipairs(desc) do
+                    if obj:IsA("BoolValue") or obj:IsA("IntValue") or obj:IsA("NumberValue") or obj:IsA("StringValue") then
+                        inspectNameValue(obj.Name, obj.Value)
+                    end
+                end
+            end
+        end
+    end
+    if positive then return true end
+    if negative then return false end
+    return nil
+end
+
+function Q.ThirdSeaPortals.tp3NoticePortalDenied()
+    local now = tick()
+    if now < (Q.ThirdSeaPortals.denialSeenUntil or 0) then return true end
+    if now - (Q.ThirdSeaPortals.lastDenialScan or 0) < 2.5 then return false end
+    Q.ThirdSeaPortals.lastDenialScan = now
+    local pg = LocalPlayer and LocalPlayer:FindFirstChild("PlayerGui")
+    if not pg then return false end
+    local scanned = 0
+    local ok, descendants = pcall(function() return pg:GetDescendants() end)
+    if not ok then return false end
+    for _, obj in ipairs(descendants) do
+        if obj:IsA("TextLabel") or obj:IsA("TextButton") then
+            scanned = scanned + 1
+            if scanned > 1400 then break end
+            local textValue = Q.ThirdSeaPortals.tp3Lower(obj.Text)
+            if string.find(textValue, "cannot access this portal yet", 1, true)
+                or string.find(textValue, "you must defeat rip_indra", 1, true)
+                or string.find(textValue, "defeat rip indra to use", 1, true) then
+                Q.ThirdSeaPortals.denialSeenUntil = now + 45
+                Q.ThirdSeaPortals.status = "Portal khóa: yêu cầu hạ rip_indra trước"
+                _G.MinhHubThirdSeaPortalStatus = Q.ThirdSeaPortals.status
+                return true
+            end
+        end
+    end
+    return false
+end
+
+function Q.ThirdSeaPortals.tp3PortalPosition(obj)
+    local ok, pos = pcall(function()
+        if obj:IsA("BasePart") then return obj.Position end
+        if obj:IsA("Model") then return obj:GetPivot().Position end
+        if obj:IsA("Folder") then
+            local part = obj:FindFirstChildWhichIsA("BasePart", true)
+            return part and part.Position or nil
+        end
+        return nil
+    end)
+    return ok and pos or nil
+end
+
+function Q.ThirdSeaPortals.tp3IsExplicitlyLocked(obj)
+    local function checkAttributes(inst)
+        local ok, attrs = pcall(function() return inst:GetAttributes() end)
+        if not ok or type(attrs) ~= "table" then return false end
+        for key, value in pairs(attrs) do
+            local k = Q.ThirdSeaPortals.tp3Lower(key):gsub("[^%w]", "")
+            if (k == "locked" or k == "islocked" or k == "disabled" or k == "isdisabled") and value == true then return true end
+            if (k == "open" or k == "isopen" or k == "unlocked" or k == "isenabled" or k == "active") and value == false then return true end
+            if (k == "state" or k == "status") and type(value) == "string" then
+                local v = Q.ThirdSeaPortals.tp3Lower(value)
+                if string.find(v, "locked", 1, true) or string.find(v, "closed", 1, true) or string.find(v, "disabled", 1, true) then return true end
+            end
+        end
+        return false
+    end
+    local node = obj
+    local depth = 0
+    while node and depth < 5 do
+        if checkAttributes(node) then return true end
+        local nm = Q.ThirdSeaPortals.tp3Lower(node.Name)
+        if string.find(nm, "lockedportal", 1, true) or string.find(nm, "closedportal", 1, true) or string.find(nm, "disabledportal", 1, true) then
+            return true
+        end
+        if node:IsA("BoolValue") then
+            if (nm == "locked" or nm == "islocked" or nm == "disabled" or nm == "isdisabled") and node.Value == true then return true end
+            if (nm == "open" or nm == "isopen" or nm == "unlocked" or nm == "isenabled" or nm == "active") and node.Value == false then return true end
+        elseif node:IsA("StringValue") and (nm == "state" or nm == "status") then
+            local v = Q.ThirdSeaPortals.tp3Lower(node.Value)
+            if string.find(v, "locked", 1, true) or string.find(v, "closed", 1, true) or string.find(v, "disabled", 1, true) then return true end
+        end
+        node = node.Parent
+        depth = depth + 1
+    end
+    local okD, desc = pcall(function() return obj:GetDescendants() end)
+    if okD then
+        for _, child in ipairs(desc) do
+            if checkAttributes(child) then return true end
+            local nm = Q.ThirdSeaPortals.tp3Lower(child.Name)
+            if child:IsA("BoolValue") then
+                if (nm == "locked" or nm == "islocked" or nm == "disabled" or nm == "isdisabled") and child.Value == true then return true end
+                if (nm == "open" or nm == "isopen" or nm == "unlocked" or nm == "isenabled" or nm == "active") and child.Value == false then return true end
+            elseif child:IsA("StringValue") and (nm == "state" or nm == "status") then
+                local v = Q.ThirdSeaPortals.tp3Lower(child.Value)
+                if string.find(v, "locked", 1, true) or string.find(v, "closed", 1, true) or string.find(v, "disabled", 1, true) then return true end
+            end
+        end
+    end
+    return false
+end
+
+function Q.ThirdSeaPortals.tp3PortalLooksActive(obj, trigger)
+    if not obj or not obj.Parent or Q.ThirdSeaPortals.tp3IsExplicitlyLocked(obj) then return false end
+    local activeFx, touchPart, visiblePart = false, false, false
+    local function inspect(inst)
+        if inst:IsA("ParticleEmitter") or inst:IsA("Beam") or inst:IsA("Trail")
+            or inst:IsA("PointLight") or inst:IsA("SpotLight") or inst:IsA("SurfaceLight") then
+            if inst.Enabled then activeFx = true end
+        elseif inst:IsA("BasePart") then
+            if inst.CanTouch then touchPart = true end
+            if inst.Transparency < 0.99 or inst.Material == Enum.Material.Neon or inst.Material == Enum.Material.ForceField then
+                visiblePart = true
+            end
+        end
+    end
+    inspect(obj)
+    local ok, desc = pcall(function() return obj:GetDescendants() end)
+    if ok then for _, inst in ipairs(desc) do inspect(inst) end end
+    if trigger and trigger.Parent and trigger.CanTouch then touchPart = true end
+    -- A named portal object plus a visible/touchable column (or enabled portal FX) is
+    -- treated as active. Explicit Locked/Closed/Disabled markers always override this.
+    return (visiblePart and touchPart) or activeFx
+end
+
+function Q.ThirdSeaPortals.tp3Metadata(obj)
+    local bits, node, depth = {}, obj, 0
+    while node and depth < 4 do
+        bits[#bits + 1] = tostring(node.Name)
+        local ok, attrs = pcall(function() return node:GetAttributes() end)
+        if ok and type(attrs) == "table" then
+            for k, v in pairs(attrs) do
+                if type(v) == "string" or type(v) == "boolean" then
+                    bits[#bits + 1] = tostring(k) .. " " .. tostring(v)
+                end
+            end
+        end
+        if node.Name == "Map" then break end
+        node, depth = node.Parent, depth + 1
+    end
+    local ok, desc = pcall(function() return obj:GetDescendants() end)
+    if ok then
+        local n = 0
+        for _, child in ipairs(desc) do
+            if child:IsA("TextLabel") or child:IsA("TextButton") then
+                bits[#bits + 1] = tostring(child.Text)
+                n = n + 1
+                if n >= 8 then break end
+            end
+        end
+    end
+    return Q.ThirdSeaPortals.tp3Lower(table.concat(bits, " "))
+end
+
+function Q.ThirdSeaPortals.tp3TriggerPart(obj, pos)
+    if not obj or not pos then return nil end
+    if obj:IsA("BasePart") then return obj end
+
+    local best, bestScore
+    local ok, desc = pcall(function() return obj:GetDescendants() end)
+    if not ok then return nil end
+    for _, child in ipairs(desc) do
+        if child:IsA("BasePart") then
+            local dXZ = Q.ThirdSeaPortals.tp3DistanceXZ(child.Position, pos)
+            local dY = math.abs(child.Position.Y - pos.Y)
+            local widest = math.max(child.Size.X, child.Size.Z)
+            local thinnest = math.min(child.Size.X, child.Size.Z)
+            local isFlatPad = widest >= 4 and child.Size.Y <= math.max(3, thinnest * 0.45)
+            -- Ưu tiên bệ phẳng có thể chạm thay vì cột sáng cao ở giữa portal.
+            local score = dXZ * 2 + dY * 0.18
+                + (child.CanTouch and -24 or 22)
+                + (child.Transparency >= 1 and 18 or 0)
+                + (child.CanCollide and -3 or 0)
+            if isFlatPad then score = score - 65 end
+            if child.Size.Y > widest * 1.2 then score = score + 55 end
+            if dXZ <= 35 and (not bestScore or score < bestScore) then
+                best, bestScore = child, score
+            end
+        end
+    end
+    return best
+end
+
+-- Điểm đứng khi vào portal: ưu tiên mặt trên của bệ phẳng ở chân cổng.
+-- Nếu map không có bệ phẳng nhận diện được, hạ điểm tiếp cận xuống chân trigger cao.
+function Q.ThirdSeaPortals.tp3StandPosition(portal)
+    if not portal or not portal.position then return nil end
+    local anchor = portal.position
+    local obj = portal.instance
+    local parts = {}
+    if obj and obj.Parent then
+        if obj:IsA("BasePart") then
+            parts[#parts + 1] = obj
+        else
+            local ok, desc = pcall(function() return obj:GetDescendants() end)
+            if ok then
+                for _, child in ipairs(desc) do
+                    if child:IsA("BasePart") then parts[#parts + 1] = child end
+                end
+            end
+        end
+    end
+
+    local best, bestScore
+    for _, part in ipairs(parts) do
+        local dXZ = Q.ThirdSeaPortals.tp3DistanceXZ(part.Position, anchor)
+        local widest = math.max(part.Size.X, part.Size.Z)
+        local thinnest = math.min(part.Size.X, part.Size.Z)
+        local flatPad = widest >= 4 and part.Size.Y <= math.max(3, thinnest * 0.45)
+        if flatPad and dXZ <= 28 and math.abs(part.Position.Y - anchor.Y) <= 120 then
+            -- Ưu tiên mặt phẳng thấp nhất gần tâm X/Z của cổng.
+            local score = part.Position.Y + dXZ * 0.06
+                + (part.Transparency >= 1 and 2.5 or 0)
+                + (part.CanTouch and -1.0 or 0)
+            if not bestScore or score < bestScore then
+                best, bestScore = part, score
+            end
+        end
+    end
+
+    if best then
+        -- HumanoidRootPart nằm gần mặt bệ, không đặt giữa cột sáng.
+        return Vector3.new(best.Position.X, best.Position.Y + best.Size.Y * 0.5 + 2.0, best.Position.Z)
+    end
+
+    local trigger = portal.trigger
+    if trigger and trigger.Parent then
+        local widest = math.max(trigger.Size.X, trigger.Size.Z)
+        if trigger.Size.Y >= 8 and trigger.Size.Y > widest * 1.2 then
+            return Vector3.new(trigger.Position.X, trigger.Position.Y - trigger.Size.Y * 0.5 + 2.0, trigger.Position.Z)
+        end
+        if trigger.Size.Y <= math.max(3, math.min(trigger.Size.X, trigger.Size.Z) * 0.45) then
+            return Vector3.new(trigger.Position.X, trigger.Position.Y + trigger.Size.Y * 0.5 + 2.0, trigger.Position.Z)
+        end
+    end
+    return Vector3.new(anchor.X, anchor.Y + 2.0, anchor.Z)
+end
+
+function Q.ThirdSeaPortals.tp3CollectPortals(islandName, forceRefresh)
+    local now = tick()
+    local cache = Q.ThirdSeaPortals.cache[islandName]
+    if not forceRefresh and cache and now - (cache.at or 0) < 2.0 then
+        local valid = true
+        for _, c in ipairs(cache.items) do
+            -- Recheck cached instances so a streamed-out or locked portal is never reused.
+            if not c.instance or not c.instance.Parent
+                or Q.ThirdSeaPortals.tp3IsExplicitlyLocked(c.instance)
+                or not Q.ThirdSeaPortals.tp3PortalLooksActive(c.instance, c.trigger) then
+                valid = false
+                break
+            end
+        end
+        if valid then return cache.items end
+    end
+    local info = Q.ThirdSeaPortals.hubs[islandName]
+    if not info or Q.ThirdSeaPortals.tp3NoticePortalDenied() then return {} end
+    local knownUnlock = Q.ThirdSeaPortals.tp3ReadUnlockFlag()
+    if knownUnlock == false then
+        Q.ThirdSeaPortals.status = "Portal khóa: chưa có cờ xác nhận đã hạ rip_indra"
+        _G.MinhHubThirdSeaPortalStatus = Q.ThirdSeaPortals.status
+        Q.ThirdSeaPortals.cache[islandName] = {at = now, items = {}}
+        return {}
+    end
+    local map = workspace:FindFirstChild("Map")
+    if not map then return {} end
+    local found = {}
+    local ok, desc = pcall(function() return map:GetDescendants() end)
+    if not ok then return {} end
+    for _, obj in ipairs(desc) do
+        local allowedClass = obj:IsA("BasePart") or obj:IsA("Model") or obj:IsA("Folder")
+        local nm = Q.ThirdSeaPortals.tp3Lower(obj.Name)
+        local namedPortal = string.find(nm, "portal", 1, true) ~= nil or string.find(nm, "teleport", 1, true) ~= nil
+        if allowedClass and namedPortal then
+            local pos = Q.ThirdSeaPortals.tp3PortalPosition(obj)
+            if pos and Q.ThirdSeaPortals.tp3DistanceXZ(pos, info.portal) <= (islandName == "Castle on the Sea" and 520 or 330)
+                and math.abs(pos.Y - info.portal.Y) <= 520 then
+                local trigger = Q.ThirdSeaPortals.tp3TriggerPart(obj, pos)
+                if Q.ThirdSeaPortals.tp3PortalLooksActive(obj, trigger) then
+                    local existing
+                    for _, c in ipairs(found) do
+                        if (c.position - pos).Magnitude <= 12 then existing = c; break end
+                    end
+                    if existing then
+                        if obj:IsA("Model") or obj:IsA("Folder") then
+                            existing.instance = obj
+                            existing.trigger = trigger or existing.trigger
+                        end
+                        existing.meta = existing.meta .. " " .. Q.ThirdSeaPortals.tp3Metadata(obj)
+                    else
+                        found[#found + 1] = {
+                            instance = obj,
+                            trigger = trigger,
+                            position = pos,
+                            meta = Q.ThirdSeaPortals.tp3Metadata(obj),
+                        }
+                    end
+                end
+            end
+        end
+    end
+    Q.ThirdSeaPortals.cache[islandName] = {at = now, items = found}
+    if #found == 0 then
+        Q.ThirdSeaPortals.status = "Chưa xác minh portal hoạt động tại " .. islandName .. "; bỏ qua cổng"
+    else
+        Q.ThirdSeaPortals.status = "Đã quét thấy " .. tostring(#found) .. " portal hoạt động tại " .. islandName
+    end
+    _G.MinhHubThirdSeaPortalStatus = Q.ThirdSeaPortals.status
+    return found
+end
+
+function Q.ThirdSeaPortals.tp3PickCastlePortal(targetIsland)
+    local portals = Q.ThirdSeaPortals.tp3CollectPortals("Castle on the Sea", false)
+    if #portals == 0 then return nil end
+    local target = Q.ThirdSeaPortals.tp3Lower(targetIsland)
+    for _, p in ipairs(portals) do
+        if target == "hydra island" and string.find(p.meta, "hydra", 1, true) then return p end
+        if target == "floating turtle" and (string.find(p.meta, "mansion", 1, true)
+            or string.find(p.meta, "floating turtle", 1, true) or string.find(p.meta, "turtle", 1, true)) then return p end
+    end
+    -- Nếu tên/nhãn của model không nói rõ đích, chỉ dùng thứ tự trái-giữa-phải
+    -- khi đã quét được đủ 3 portal ở Castle. Portal trái màu cam đi Tiki Outpost,
+    -- portal giữa đi Mansion/Floating Turtle, portal phải đi Hydra Island.
+    if #portals < 3 then return nil end
+    local right = Vector3.new(1, 0, 0)
+    local map = workspace:FindFirstChild("Map")
+    local castleModel = map and (map:FindFirstChild("Boat Castle") or map:FindFirstChild("Castle on the Sea"))
+    if castleModel then
+        local ok, cf = pcall(function() return castleModel:GetPivot() end)
+        if ok and cf then right = cf.RightVector end
+    end
+    local spreadX, spreadZ = 0, 0
+    local minX, maxX, minZ, maxZ = math.huge, -math.huge, math.huge, -math.huge
+    for _, p in ipairs(portals) do
+        minX, maxX = math.min(minX, p.position.X), math.max(maxX, p.position.X)
+        minZ, maxZ = math.min(minZ, p.position.Z), math.max(maxZ, p.position.Z)
+    end
+    spreadX, spreadZ = maxX - minX, maxZ - minZ
+    if spreadX > spreadZ and math.abs(right.X) < 0.35 then right = Vector3.new(1, 0, 0)
+    elseif spreadZ > spreadX and math.abs(right.Z) < 0.35 then right = Vector3.new(0, 0, 1) end
+    table.sort(portals, function(a, b)
+        return (a.position:Dot(right)) < (b.position:Dot(right))
+    end)
+    if target == "floating turtle" then return portals[2] end
+    if target == "hydra island" then return portals[#portals] end
+    return nil
+end
+
+function Q.ThirdSeaPortals.findEntry(fromIsland, targetIsland, forceRefresh)
+    if fromIsland == "Castle on the Sea" then
+        return Q.ThirdSeaPortals.tp3PickCastlePortal(targetIsland)
+    end
+    if fromIsland ~= "Floating Turtle" and fromIsland ~= "Hydra Island" then return nil end
+    local items = Q.ThirdSeaPortals.tp3CollectPortals(fromIsland, forceRefresh == true)
+    if #items == 0 then return nil end
+    -- The one portal on Mansion/Floating Turtle and the one at Hydra return to Castle.
+    local best, bestScore
+    local anchor = Q.ThirdSeaPortals.hubs[fromIsland].portal
+    for _, item in ipairs(items) do
+        local score = Q.ThirdSeaPortals.tp3DistanceXZ(item.position, anchor)
+        if not bestScore or score < bestScore then best, bestScore = item, score end
+    end
+    return best
+end
+
+-- Xây tuyến rõ ràng giữa ba khu vực. Floating Turtle <-> Hydra đi qua Castle;
+-- mỗi chặng được xác minh ngay trước khi tiếp cận để hỗ trợ map stream theo khoảng cách.
+function Q.ThirdSeaPortals.buildRoute(fromIsland, targetIsland)
+    if not fromIsland or not targetIsland or fromIsland == targetIsland then return nil end
+    if fromIsland == "Castle on the Sea" then
+        return {targetIsland}
+    elseif targetIsland == "Castle on the Sea" then
+        return {"Castle on the Sea"}
+    end
+    return {"Castle on the Sea", targetIsland}
+end
+
+function Q.ThirdSeaPortals.makePlan(fromPos, targetPos)
+    if not World3 or _G.__MHThirdSeaPortalBypass then return nil end
+    local fromIsland = Q.ThirdSeaPortals.classify(fromPos)
+    local targetIsland = Q.ThirdSeaPortals.classify(targetPos)
+    if not fromIsland or not targetIsland or fromIsland == targetIsland then return nil end
+
+    local route = Q.ThirdSeaPortals.buildRoute(fromIsland, targetIsland)
+    if not route then return nil end
+
+    local entries = {}
+    local current = fromIsland
+    for index, nextIsland in ipairs(route) do
+        local edgeKey = current .. ">" .. nextIsland
+        local entry
+        -- Mô hình/map của các đảo xa có thể chưa được stream vào Workspace.
+        -- Bắt buộc xác minh chặng đầu tại đảo hiện tại; các chặng sau sẽ quét lại
+        -- khi đã tới đảo trung chuyển, không loại cả tuyến chỉ vì map xa chưa tải.
+        if tick() >= (Q.ThirdSeaPortals.deniedUntil[edgeKey] or 0) then
+            entry = Q.ThirdSeaPortals.findEntry(current, nextIsland, false)
+        end
+        if index == 1 and not entry then
+            Q.ThirdSeaPortals.status = "Chưa xác minh cổng " .. current .. " → " .. nextIsland .. "; không bay tới cổng"
+            _G.MinhHubThirdSeaPortalStatus = Q.ThirdSeaPortals.status
+            return nil
+        end
+        entries[#entries + 1] = {from = current, target = nextIsland, portal = entry}
+        current = nextIsland
+    end
+
+    if current ~= targetIsland or #entries == 0 then return nil end
+    Q.ThirdSeaPortals.status = "Đã xác minh cổng đầu; các chặng tiếp theo sẽ quét lại tại đảo trung chuyển"
+    _G.MinhHubThirdSeaPortalStatus = Q.ThirdSeaPortals.status
+    return {from = fromIsland, target = targetIsland, route = route, entries = entries, firstEntry = entries[1].portal}
+end
+
+function Q.ThirdSeaPortals.tp3GetRoot(fallback)
+    local char = LocalPlayer and LocalPlayer.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if root and root.Parent then return root end
+    return fallback and fallback.Parent and fallback or nil
+end
+
+function Q.ThirdSeaPortals.tp3MoveRootTo(targetPos, speed, active)
+    local started = tick()
+    local root = Q.ThirdSeaPortals.tp3GetRoot(nil)
+    if not root then return false end
+    local spd = math.clamp(tonumber(speed) or 190, 70, 360)
+    while tick() - started < 85 do
+        if active and not active() then return false end
+        root = Q.ThirdSeaPortals.tp3GetRoot(root)
+        if not root then return false end
+        local delta = targetPos - root.Position
+        local dist = delta.Magnitude
+        if dist <= 3 then
+            root.AssemblyLinearVelocity = Vector3.zero
+            root.AssemblyAngularVelocity = Vector3.zero
+            return true
+        end
+        local dt = math.min(RunService.Heartbeat:Wait(), 0.1)
+        if active and not active() then return false end
+        root = Q.ThirdSeaPortals.tp3GetRoot(root)
+        if not root then return false end
+        delta = targetPos - root.Position
+        dist = delta.Magnitude
+        if dist <= 3 then return true end
+        local step = math.min(dist, spd * dt)
+        local nextPos = root.Position + delta.Unit * step
+        local flat = Vector3.new(delta.X, 0, delta.Z)
+        local look = flat.Magnitude > 0.05 and (nextPos + flat.Unit) or (nextPos + root.CFrame.LookVector)
+        root.CFrame = CFrame.new(nextPos, look)
+        root.AssemblyLinearVelocity = Vector3.zero
+        root.AssemblyAngularVelocity = Vector3.zero
+        local character = root.Parent
+        if character then
+            for _, part in ipairs(character:GetChildren()) do
+                if part:IsA("BasePart") and part.CanCollide then part.CanCollide = false end
+            end
+        end
+    end
+    return false
+end
+
+function Q.ThirdSeaPortals.tp3TouchPortal(portal, standPos)
+    local root = Q.ThirdSeaPortals.tp3GetRoot(nil)
+    local part = portal and portal.trigger
+    if not root or not part or not part.Parent then return false end
+    -- Không đặt HRP vào Position của cột portal (thường nằm cao giữa luồng sáng).
+    -- Giữ nhân vật sát mặt bệ rồi mới chạm trigger.
+    local safePos = standPos or Q.ThirdSeaPortals.tp3StandPosition(portal)
+    if not safePos then return false end
+    root.CFrame = CFrame.new(safePos)
+    root.AssemblyLinearVelocity = Vector3.zero
+    root.AssemblyAngularVelocity = Vector3.zero
+    local touchFn = firetouchinterest
+    if type(touchFn) == "function" then
+        pcall(function() touchFn(root, part, 0) end)
+        task.wait(0.12)
+        pcall(function() touchFn(root, part, 1) end)
+    end
+    return true
+end
+
+function Q.ThirdSeaPortals.execute(initialRoot, goalCF, speed, active, plan)
+    if not plan or not goalCF or type(plan.entries) ~= "table" then return false end
+
+    for _, hop in ipairs(plan.entries) do
+        if active and not active() then return false end
+        local root = Q.ThirdSeaPortals.tp3GetRoot(initialRoot)
+        if not root then return false end
+
+        local here = Q.ThirdSeaPortals.classify(root.Position)
+        if here == hop.target then
+            -- Already arrived at this hop's destination; continue with the next hop.
+            continue
+        end
+        if here ~= hop.from then
+            Q.ThirdSeaPortals.status = "Vị trí đổi giữa hành trình (đang ở " .. tostring(here) .. "); hủy tuyến portal an toàn"
+            _G.MinhHubThirdSeaPortalStatus = Q.ThirdSeaPortals.status
+            return false
+        end
+
+        local portal = hop.portal
+        local usable = portal and portal.instance and portal.instance.Parent
+            and not Q.ThirdSeaPortals.tp3IsExplicitlyLocked(portal.instance)
+            and Q.ThirdSeaPortals.tp3PortalLooksActive(portal.instance, portal.trigger)
+        if not usable then
+            -- Portal may stream out or change state after preflight; rescan before approaching it.
+            portal = Q.ThirdSeaPortals.findEntry(hop.from, hop.target, true)
+        end
+        if not portal then
+            Q.ThirdSeaPortals.status = "Không thấy cổng " .. hop.from .. " → " .. hop.target .. "; không bay tới cổng, chuyển sang đường bay thường"
+            _G.MinhHubThirdSeaPortalStatus = Q.ThirdSeaPortals.status
+            if hop.from == plan.from then return false end
+            -- Chặng đầu đã qua cổng, nhưng portal ở đảo trung chuyển có thể chưa tải
+            -- hoặc chưa mở. Không tiếp cận cổng đó; dùng đường bay thường tới đích.
+            local directOk = Q.ThirdSeaPortals.tp3MoveRootTo(goalCF.Position, speed, active)
+            local directRoot = Q.ThirdSeaPortals.tp3GetRoot(initialRoot)
+            if directOk and directRoot then
+                directRoot.CFrame = goalCF
+                directRoot.AssemblyLinearVelocity = Vector3.zero
+                directRoot.AssemblyAngularVelocity = Vector3.zero
+            end
+            return directOk
+        end
+
+        Q.ThirdSeaPortals.status = "Cổng đã xác minh; đang vào " .. hop.from .. " → " .. hop.target
+        _G.MinhHubThirdSeaPortalStatus = Q.ThirdSeaPortals.status
+        local standPos = Q.ThirdSeaPortals.tp3StandPosition(portal)
+        if not standPos then
+            Q.ThirdSeaPortals.status = "Không xác định được mặt đứng an toàn của portal; hủy chặng"
+            _G.MinhHubThirdSeaPortalStatus = Q.ThirdSeaPortals.status
+            return false
+        end
+        if not Q.ThirdSeaPortals.tp3MoveRootTo(standPos, speed, active) then return false end
+        if active and not active() then return false end
+
+        -- Verify once more at the portal; do not trigger it if it just became locked/inactive.
+        if not portal.instance or not portal.instance.Parent
+            or Q.ThirdSeaPortals.tp3IsExplicitlyLocked(portal.instance)
+            or not Q.ThirdSeaPortals.tp3PortalLooksActive(portal.instance, portal.trigger) then
+            Q.ThirdSeaPortals.status = "Portal đổi trạng thái khi đang tiếp cận; không kích hoạt"
+            _G.MinhHubThirdSeaPortalStatus = Q.ThirdSeaPortals.status
+            Q.ThirdSeaPortals.cache[hop.from] = nil
+            return false
+        end
+        if not Q.ThirdSeaPortals.tp3TouchPortal(portal, standPos) then return false end
+
+        local deadline = tick() + 15
+        local arrivedIsland
+        while tick() < deadline do
+            if active and not active() then return false end
+            local r = Q.ThirdSeaPortals.tp3GetRoot(initialRoot)
+            if not r then return false end
+            local nowIsland = Q.ThirdSeaPortals.classify(r.Position)
+            if nowIsland == hop.target then
+                arrivedIsland = nowIsland
+                break
+            end
+            if nowIsland and nowIsland ~= hop.from and nowIsland ~= hop.target then
+                break -- Server moved us to an unexpected hub; never continue a stale route.
+            end
+            task.wait(0.12)
+        end
+
+        if arrivedIsland ~= hop.target then
+            local edgeKey = hop.from .. ">" .. hop.target
+            Q.ThirdSeaPortals.deniedUntil[edgeKey] = tick() + 30
+            Q.ThirdSeaPortals.status = "Portal không xác nhận chuyển đúng đảo; tạm dừng thử lại tuyến này"
+            _G.MinhHubThirdSeaPortalStatus = Q.ThirdSeaPortals.status
+            Q.ThirdSeaPortals.cache = {}
+            return false
+        end
+
+        Q.ThirdSeaPortals.cache = {} -- map may stream again after teleport
+        Q.ThirdSeaPortals.status = "Đã qua portal: " .. hop.target
+        _G.MinhHubThirdSeaPortalStatus = Q.ThirdSeaPortals.status
+    end
+
+    if active and not active() then return false end
+    local finalRoot = Q.ThirdSeaPortals.tp3GetRoot(initialRoot)
+    if not finalRoot then return false end
+    local finalIsland = Q.ThirdSeaPortals.classify(finalRoot.Position)
+    if finalIsland ~= plan.target then
+        Q.ThirdSeaPortals.status = "Chưa đứng đúng đảo đích; hủy bay tiếp để tránh xuyên map"
+        _G.MinhHubThirdSeaPortalStatus = Q.ThirdSeaPortals.status
+        return false
+    end
+
+    Q.ThirdSeaPortals.status = "Đã qua đủ portal; đang bay tới mục tiêu"
+    _G.MinhHubThirdSeaPortalStatus = Q.ThirdSeaPortals.status
+    local reached = Q.ThirdSeaPortals.tp3MoveRootTo(goalCF.Position, speed, active)
+    finalRoot = Q.ThirdSeaPortals.tp3GetRoot(initialRoot)
+    if reached and finalRoot then
+        finalRoot.CFrame = goalCF
+        finalRoot.AssemblyLinearVelocity = Vector3.zero
+        finalRoot.AssemblyAngularVelocity = Vector3.zero
+        Q.ThirdSeaPortals.status = "Đã đến mục tiêu sau khi qua portal"
+        _G.MinhHubThirdSeaPortalStatus = Q.ThirdSeaPortals.status
+    end
+    return reached
 end
 
 -- Fishman Island (Sea 1), Cursed Ship (Sea 2) và Submerged Island (Sea 3)
@@ -2732,12 +3464,12 @@ function Q.ClaimCakeQuest()
 end
 
 -- UI HELPERS & THEME CONFIG (MINH HUB STYLE)
-local BANANA_YELLOW       = Color3.fromRGB(0, 170, 255)   -- xanh neon công nghệ (điểm nhấn)
-local BANANA_DARK         = Color3.fromRGB(30, 90, 130)   -- viền cửa sổ
-local BANANA_BG           = Color3.fromRGB(8, 12, 20)
-local BANANA_SIDEBAR      = Color3.fromRGB(5, 8, 14)
-local BANANA_CARD         = Color3.fromRGB(14, 22, 36)
-local BANANA_CARD_BORDER  = Color3.fromRGB(28, 62, 92)
+local BANANA_YELLOW       = Color3.fromRGB(0, 174, 255)   -- xanh cyan theo giao diện tham khảo
+local BANANA_DARK         = Color3.fromRGB(37, 40, 49)
+local BANANA_BG           = Color3.fromRGB(20, 21, 27)
+local BANANA_SIDEBAR      = Color3.fromRGB(15, 16, 21)
+local BANANA_CARD         = Color3.fromRGB(34, 35, 42)
+local BANANA_CARD_BORDER  = Color3.fromRGB(59, 62, 72)
 local BANANA_TEXT_ON      = Color3.fromRGB(255, 255, 255)
 
 local function addCorner(parent, radius)
@@ -2812,18 +3544,31 @@ do
     bananaIcon.Parent = toggleBtn
 end
 
-local MH = { W = 520, H = 390, HEAD = 34, SIDE = 165 }
+local MH = { W = 790, H = 460, HEAD = 38, SIDE = 225 }
 
 local mainFrame = Instance.new("Frame")
 mainFrame.Name = "MainFrame"
 mainFrame.Size = UDim2.new(0, MH.W, 0, MH.H)
 mainFrame.Position = UDim2.new(0.5, -MH.W / 2, 0.5, -MH.H / 2)
 mainFrame.BackgroundColor3 = BANANA_BG
-mainFrame.BackgroundTransparency = 0.06
+mainFrame.BackgroundTransparency = 0.12
 mainFrame.BorderSizePixel = 0
 mainFrame.ClipsDescendants = true
 mainFrame.Visible = true
 mainFrame.Parent = screenGui
+
+-- MENU FAILSAFE: nếu một module farm phía dưới gặp lỗi runtime, không để
+-- ScreenGui bị Enabled=false vô thời hạn. Khi script hoàn tất, MinhHubLoadDone
+-- vẫn điều khiển hiệu ứng loading như cũ; đây chỉ là dự phòng.
+task.delay(25, function()
+    pcall(function()
+        if screenGui and screenGui.Parent then
+            screenGui.Enabled = true
+            if mainFrame then mainFrame.Visible = true end
+            if toggleBtn then toggleBtn.Visible = true end
+        end
+    end)
+end)
 addCorner(mainFrame, 6)
 do
     local winStroke = addStroke(mainFrame, Color3.new(1, 1, 1), 1.2)
@@ -2892,6 +3637,27 @@ header.BorderSizePixel = 0
 header.Parent = mainFrame
 
 do
+local headerLogo = Instance.new("Frame")
+headerLogo.Name = "HeaderLogo"
+headerLogo.Size = UDim2.new(0, 26, 0, 26)
+headerLogo.Position = UDim2.new(0, 8, 0, 6)
+headerLogo.BackgroundColor3 = BANANA_SIDEBAR
+headerLogo.BackgroundTransparency = 0.02
+headerLogo.BorderSizePixel = 0
+headerLogo.Parent = header
+addCorner(headerLogo, 6)
+addStroke(headerLogo, BANANA_YELLOW, 1.4)
+local headerLogoText = Instance.new("TextLabel")
+headerLogoText.Size = UDim2.new(1, 0, 1, 0)
+headerLogoText.BackgroundTransparency = 1
+headerLogoText.Text = "M"
+headerLogoText.TextColor3 = BANANA_YELLOW
+headerLogoText.TextSize = 17
+headerLogoText.Font = Enum.Font.GothamBlack
+headerLogoText.Parent = headerLogo
+end
+
+do
     local headLine = Instance.new("Frame")
     headLine.Name = "HeaderLine"
     headLine.Size = UDim2.new(1, 0, 0, 1)
@@ -2903,15 +3669,15 @@ do
 end
 
 local headerTitle = Instance.new("TextLabel")
-headerTitle.Size = UDim2.new(1, -150, 1, 0)
-headerTitle.Position = UDim2.new(0, 12, 0, 0)
+headerTitle.Size = UDim2.new(0, 340, 1, 0)
+headerTitle.Position = UDim2.new(0.5, -170, 0, 0)
 headerTitle.BackgroundTransparency = 1
-headerTitle.Text = "MINH_HUB <font color=\"#46D2FF\">//</font> <font color=\"#6F8CA8\">BLOX_FRUITS // PREMIUM</font>"
+headerTitle.Text = "<font color=\"#00B8FF\">MINH HUB</font> <font color=\"#E9EAF0\">: Blox Fruits</font>"
 headerTitle.RichText = true
 headerTitle.TextColor3 = Color3.fromRGB(235, 237, 245)
-headerTitle.TextSize = 12
-headerTitle.Font = Enum.Font.Code
-headerTitle.TextXAlignment = Enum.TextXAlignment.Left
+headerTitle.TextSize = 15
+headerTitle.Font = Enum.Font.GothamBold
+headerTitle.TextXAlignment = Enum.TextXAlignment.Center
 headerTitle.Parent = header
 
 function MH.winBtn(text, xOff, size)
@@ -2973,7 +3739,7 @@ do
     -- Logo lớn (chữ M cách điệu trong khung thoi) ở đầu thanh bên
     local logoWrap = Instance.new("Frame")
     logoWrap.Name = "LogoWrap"
-    logoWrap.Size = UDim2.new(1, 0, 0, 100)
+    logoWrap.Size = UDim2.new(1, 0, 0, 30)
     logoWrap.LayoutOrder = -100
     logoWrap.BackgroundTransparency = 1
     logoWrap.Parent = sidebar
@@ -2981,7 +3747,7 @@ do
     local diamond = Instance.new("Frame")
     diamond.AnchorPoint = Vector2.new(0.5, 0.5)
     diamond.Position = UDim2.new(0.5, 0, 0.5, 0)
-    diamond.Size = UDim2.new(0, 62, 0, 62)
+    diamond.Size = UDim2.new(0, 24, 0, 24)
     diamond.Rotation = 45
     diamond.BackgroundTransparency = 1
     diamond.Parent = logoWrap
@@ -2993,7 +3759,7 @@ do
     logoText.Size = UDim2.new(1, 0, 1, 0)
     logoText.BackgroundTransparency = 1
     logoText.Text = "M"
-    logoText.TextSize = 46
+    logoText.TextSize = 22
     logoText.Font = Enum.Font.GothamBlack
     logoText.TextColor3 = Color3.fromRGB(255, 255, 255)
     logoText.Parent = logoWrap
@@ -3034,16 +3800,26 @@ pagesFolder.Parent = mainFrame
 
 local tabs = {}
 local function createTab(tabName, iconText, isDefault)
-    local tabLabel = ({Farm = "Main", Boss = "Multi Farm", Gacha = "Items", Config = "Farm Settings"})[tabName] or tabName
+    -- Tên tab ngắn, dễ hiểu; thứ tự được quản lý tập trung bên dưới.
+    local tabLabel = ({
+        Server = "Server", Farm = "Farm", Boss = "Bosses", Raid = "Raid",
+        Gacha = "Items", Shop = "Shop", Skills = "Skills", ESP = "ESP",
+        Status = "Status", Config = "Settings",
+    })[tabName] or tabName
+    local tabOrder = {
+        Server = 1, Farm = 2, Boss = 3, Raid = 4, Gacha = 5,
+        Shop = 6, Skills = 7, ESP = 8, Status = 9, Config = 10,
+    }
     local tabBtn = Instance.new("TextButton")
+    tabBtn.LayoutOrder = tabOrder[tabName] or 99
     tabBtn.Size = UDim2.new(1, -20, 0, 28)
     tabBtn.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
     tabBtn.BackgroundTransparency = isDefault and 0.9 or 1
     tabBtn.AutoButtonColor = false
     tabBtn.Text = tabLabel
     tabBtn.TextColor3 = isDefault and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(165, 168, 180)
-    tabBtn.Font = Enum.Font.Code
-    tabBtn.TextSize = 12
+    tabBtn.Font = Enum.Font.GothamMedium
+    tabBtn.TextSize = 13
     tabBtn.TextXAlignment = Enum.TextXAlignment.Left
     tabBtn.Parent = sidebar
     addCorner(tabBtn, 3)
@@ -3054,7 +3830,7 @@ local function createTab(tabName, iconText, isDefault)
 
     -- biểu tượng đơn sắc bên trái tên tab
     do
-        local iconMap = {Farm = "⚔", Boss = "♛", Raid = "☄", Gacha = "✦", Shop = "⛁", Config = "⚙", ESP = "◉", Status = "▤"}
+        local iconMap = {Server = "▤", Farm = "⚔", Boss = "♛", Raid = "☄", Gacha = "✦", Shop = "⛁", Config = "⚙", ESP = "◉", Status = "▤", Skills = "✦"}
         local ic = Instance.new("TextLabel")
         ic.Size = UDim2.new(0, 22, 1, 0)
         ic.Position = UDim2.new(0, -26, 0, 0)
@@ -3139,12 +3915,155 @@ local function createTab(tabName, iconText, isDefault)
     return page
 end
 
-local farmPage     = createTab("Farm", "⚔️", true)
+local farmPage     = createTab("Farm", "⚔️", false)
 local bossPage     = createTab("Boss", "👑", false)
 local raidPage     = createTab("Raid", "🔥", false)
 local gachaPage    = createTab("Gacha", "🎲", false)
 local shopPage     = createTab("Shop", "🛒", false)
 local settingsPage = createTab("Config", "⚙️", false)
+
+-- Trang Server theo mẫu ảnh: các thẻ thông tin tối, thanh tìm kiếm và viền cyan.
+do
+    local serverPage = createTab("Server", "▤", true)
+    local serverStartedAt = os.clock()
+    local function formatServerTime(seconds)
+        seconds = math.max(0, math.floor(tonumber(seconds) or 0))
+        local h = math.floor(seconds / 3600)
+        local m = math.floor((seconds % 3600) / 60)
+        local sec = seconds % 60
+        return string.format("%02dh %02dm %02ds", h, m, sec)
+    end
+
+    local sectionBar = Instance.new("Frame")
+    sectionBar.Name = "ServerSectionHeader"
+    sectionBar.Size = UDim2.new(1, -8, 0, 29)
+    sectionBar.BackgroundColor3 = BANANA_SIDEBAR
+    sectionBar.BackgroundTransparency = 0.15
+    sectionBar.BorderSizePixel = 0
+    sectionBar.LayoutOrder = 1
+    sectionBar.Parent = serverPage
+    addCorner(sectionBar, 5)
+    addStroke(sectionBar, BANANA_CARD_BORDER, 1)
+    local sectionText = Instance.new("TextLabel")
+    sectionText.Size = UDim2.new(1, -12, 1, 0)
+    sectionText.Position = UDim2.new(0, 6, 0, 0)
+    sectionText.BackgroundTransparency = 1
+    sectionText.Text = "Chức Năng Server"
+    sectionText.TextColor3 = Color3.fromRGB(230, 232, 239)
+    sectionText.TextSize = 13
+    sectionText.Font = Enum.Font.GothamBold
+    sectionText.TextXAlignment = Enum.TextXAlignment.Center
+    sectionText.Parent = sectionBar
+    local sectionLine = Instance.new("Frame")
+    sectionLine.Size = UDim2.new(1, -10, 0, 1)
+    sectionLine.Position = UDim2.new(0, 5, 1, -2)
+    sectionLine.BackgroundColor3 = BANANA_YELLOW
+    sectionLine.BackgroundTransparency = 0.35
+    sectionLine.BorderSizePixel = 0
+    sectionLine.Parent = sectionBar
+
+    local function serverInfoCard(title, value, order, height)
+        local card = Instance.new("Frame")
+        card.Name = (title:gsub("[^%w]", "")) .. "Card"
+        card.Size = UDim2.new(1, -8, 0, height or 49)
+        card.BackgroundColor3 = BANANA_CARD
+        card.BackgroundTransparency = 0.08
+        card.BorderSizePixel = 0
+        card.LayoutOrder = order
+        card.Parent = serverPage
+        addCorner(card, 7)
+        local stroke = addStroke(card, BANANA_CARD_BORDER, 1)
+        stroke.Transparency = 0.55
+
+        local titleLabel = Instance.new("TextLabel")
+        titleLabel.Name = "Title"
+        titleLabel.Size = UDim2.new(1, -24, 0, 18)
+        titleLabel.Position = UDim2.new(0, 12, 0, 5)
+        titleLabel.BackgroundTransparency = 1
+        titleLabel.Text = title
+        titleLabel.TextColor3 = Color3.fromRGB(235, 236, 241)
+        titleLabel.TextSize = 12
+        titleLabel.Font = Enum.Font.GothamMedium
+        titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+        titleLabel.Parent = card
+
+        local valueLabel = Instance.new("TextLabel")
+        valueLabel.Name = "Value"
+        valueLabel.Size = UDim2.new(1, -24, 0, (height or 49) - 24)
+        valueLabel.Position = UDim2.new(0, 12, 0, 23)
+        valueLabel.BackgroundTransparency = 1
+        valueLabel.Text = value
+        valueLabel.TextColor3 = Color3.fromRGB(214, 216, 224)
+        valueLabel.TextSize = 12
+        valueLabel.Font = Enum.Font.Gotham
+        valueLabel.TextXAlignment = Enum.TextXAlignment.Left
+        valueLabel.TextYAlignment = Enum.TextYAlignment.Top
+        valueLabel.TextWrapped = true
+        valueLabel.Parent = card
+        return valueLabel
+    end
+
+    local uptimeValue = serverInfoCard("Server Uptime", formatServerTime(workspace.DistributedGameTime), 2, 49)
+    local sessionValue = serverInfoCard("Time in Server", "Từ lúc mở Minh Hub: " .. formatServerTime(0), 3, 49)
+    serverInfoCard("Dự đoán Rương (Fist of Darkness / Chalice)",
+        "Chưa có mốc spawn xác thực; không hiển thị bộ đếm ước đoán.", 4, 67)
+    local placeValue = serverInfoCard("Place ID", tostring(game.PlaceId), 5, 49)
+
+    local jobCard = Instance.new("Frame")
+    jobCard.Name = "JobIDCard"
+    jobCard.Size = UDim2.new(1, -8, 0, 66)
+    jobCard.BackgroundColor3 = BANANA_CARD
+    jobCard.BackgroundTransparency = 0.08
+    jobCard.BorderSizePixel = 0
+    jobCard.LayoutOrder = 6
+    jobCard.Parent = serverPage
+    addCorner(jobCard, 7)
+    local jobStroke = addStroke(jobCard, BANANA_CARD_BORDER, 1)
+    jobStroke.Transparency = 0.55
+    local jobTitle = Instance.new("TextLabel")
+    jobTitle.Size = UDim2.new(1, -24, 0, 18)
+    jobTitle.Position = UDim2.new(0, 12, 0, 5)
+    jobTitle.BackgroundTransparency = 1
+    jobTitle.Text = "JobID"
+    jobTitle.TextColor3 = Color3.fromRGB(235, 236, 241)
+    jobTitle.TextSize = 12
+    jobTitle.Font = Enum.Font.GothamBold
+    jobTitle.TextXAlignment = Enum.TextXAlignment.Left
+    jobTitle.Parent = jobCard
+    local jobBox = Instance.new("TextBox")
+    jobBox.Name = "JobIDInput"
+    jobBox.Size = UDim2.new(1, -16, 0, 30)
+    jobBox.Position = UDim2.new(0, 8, 0, 29)
+    jobBox.BackgroundColor3 = Color3.fromRGB(25, 26, 32)
+    jobBox.BackgroundTransparency = 0.02
+    jobBox.BorderSizePixel = 0
+    jobBox.Text = ""
+    jobBox.PlaceholderText = "Nhập JobID..."
+    jobBox.PlaceholderColor3 = Color3.fromRGB(160, 161, 170)
+    jobBox.TextColor3 = Color3.fromRGB(235, 236, 241)
+    jobBox.TextSize = 12
+    jobBox.Font = Enum.Font.GothamMedium
+    jobBox.ClearTextOnFocus = false
+    jobBox.TextXAlignment = Enum.TextXAlignment.Left
+    jobBox.Parent = jobCard
+    addCorner(jobBox, 5)
+    addStroke(jobBox, Color3.fromRGB(54, 56, 65), 1)
+    local jobPad = Instance.new("UIPadding")
+    jobPad.PaddingLeft = UDim.new(0, 8)
+    jobPad.PaddingRight = UDim.new(0, 8)
+    jobPad.Parent = jobBox
+
+    task.spawn(function()
+        while screenGui.Parent and serverPage.Parent do
+            pcall(function()
+                uptimeValue.Text = formatServerTime(workspace.DistributedGameTime)
+                sessionValue.Text = "Từ lúc mở Minh Hub: " .. formatServerTime(os.clock() - serverStartedAt)
+                placeValue.Text = tostring(game.PlaceId)
+            end)
+            task.wait(1)
+        end
+    end)
+end
 
 -- =========================================================
 -- VIETNAMESE / ENGLISH UI LANGUAGE
@@ -3611,10 +4530,10 @@ end
 do
     local searchWrap = Instance.new("Frame")
     searchWrap.Name = "SearchWrap"
-    searchWrap.Size = UDim2.new(0.92, 0, 0, 30)
+    searchWrap.Size = UDim2.new(0.92, 0, 0, 32)
     searchWrap.LayoutOrder = -10
     searchWrap.BackgroundColor3 = BANANA_CARD
-    searchWrap.Visible = false
+    searchWrap.Visible = true
     searchWrap.Parent = sidebar
     addCorner(searchWrap, 8)
     addStroke(searchWrap, BANANA_CARD_BORDER, 1)
@@ -4602,6 +5521,53 @@ createToggleFeature(bossPage, "AutoEliteHunterToggle", "Auto Elite Hunter", "Aut
     end
 end)
 
+-- [MỚI] Tab Boss: công tắc cho logic Tyrant of the Skies (Sea 3) vốn đã có sẵn nhưng chưa có nút bật/tắt.
+function TY.exclusive()
+    for _, id in ipairs({"AutoFarmTargetToggle", "AutoFarmMaterialToggle", "AutoFarmBossToggle", "AutoRaidToggle", "AutoEliteHunterToggle"}) do
+        if toggleUpdateFuncs[id] then pcall(toggleUpdateFuncs[id], false) end
+    end
+    autoFarmEnabled = false
+    autoFarmMaterialEnabled = false
+    autoRaidEnabled = false
+    _G.Dungeon = false
+    _G.EliteHunter = false
+    _G.EliteBusy = false
+end
+
+if World3 then
+    createToggleFeature(bossPage, "AutoTyrantFarmToggle", "Auto Farm Tyrant of the Skies", "Farm Tiki Outpost mobs to light the 4 eyes, then smash the vases and defeat the boss (Sea 3)", 6, false, function(state)
+        if state then
+            TY.exclusive()
+            TY.phase = "farm"; TY.kills = 0; TY.sideKills = 0; TY.vaseTry = {}
+            _G.TyrantFarm = true
+            _G.TyrantSummon = false
+            if toggleUpdateFuncs["AutoTyrantSummonToggle"] then pcall(toggleUpdateFuncs["AutoTyrantSummonToggle"], false) end
+        else
+            _G.TyrantFarm = false
+            TY.status = "Disabled"
+            TY.hover = nil; TY.goal = nil; TY.hold = nil
+            targetEnemy = nil
+            if not _G.TyrantSummon then stopAllFlying() end
+        end
+    end)
+
+    createToggleFeature(bossPage, "AutoTyrantSummonToggle", "Auto Summon Tyrant", "Skip farming: only smash the clay vases and fight Tyrant (use when the 4 eyes are already lit)", 7, false, function(state)
+        if state then
+            TY.exclusive()
+            TY.phase = "summon"; TY.phaseAt = tick(); TY.vaseTry = {}; TY.vaseAt = 0
+            _G.TyrantSummon = true
+            _G.TyrantFarm = false
+            if toggleUpdateFuncs["AutoTyrantFarmToggle"] then pcall(toggleUpdateFuncs["AutoTyrantFarmToggle"], false) end
+        else
+            _G.TyrantSummon = false
+            TY.status = "Disabled"
+            TY.hover = nil; TY.goal = nil; TY.hold = nil
+            targetEnemy = nil
+            if not _G.TyrantFarm then stopAllFlying() end
+        end
+    end)
+end
+
 
 -- TAB RAID CONTENT
 local raidFrame = Instance.new("Frame")
@@ -4712,101 +5678,20 @@ end)
 if World2 then
     createToggleFeature(raidPage, "AutoLawRaidToggle", "Auto Law Raid", "Automatically fight the Order (Law) Boss", 6, _G.AutoLawRaid, function(state)
         _G.AutoLawRaid = state
+        if state then
+            for _, id in ipairs({"AutoFarmTargetToggle", "AutoFarmMaterialToggle", "AutoFarmBossToggle"}) do
+                if toggleUpdateFuncs[id] then pcall(toggleUpdateFuncs[id], false) end
+            end
+            autoFarmEnabled = false
+            autoFarmMaterialEnabled = false
+        else
+            targetEnemy = nil
+            stopAllFlying()
+        end
     end)
 end
 
--- RAID HEIGHT SLIDER: bản đồng bộ của thanh Farm Height (kéo bên nào thì bên kia chạy theo)
-;(function()
-    local MAXH = 100
-    local startH = math.clamp(tonumber(farmDistanceHeight) or 35, 0, MAXH)
-
-    local card = Instance.new("Frame")
-    card.Name = "RaidHeightCard"
-    card.Size = UDim2.new(1, 0, 0, 56)
-    card.BackgroundColor3 = BANANA_CARD
-    card.LayoutOrder = 7
-    card.Parent = raidPage
-    addCorner(card, 8)
-    addStroke(card, BANANA_CARD_BORDER, 1.2)
-
-    local title = Instance.new("TextLabel")
-    title.Size = UDim2.new(0.65, 0, 0, 28)
-    title.Position = UDim2.new(0, 12, 0, 4)
-    title.BackgroundTransparency = 1
-    title.Text = "Farm Height (Flight Altitude)"
-    title.TextColor3 = Color3.fromRGB(255, 255, 255)
-    title.TextSize = 12
-    title.Font = Enum.Font.GothamBold
-    title.TextXAlignment = Enum.TextXAlignment.Left
-    title.Parent = card
-
-    local box = Instance.new("TextBox")
-    box.Size = UDim2.new(0, 60, 0, 24)
-    box.Position = UDim2.new(1, -70, 0, 6)
-    box.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
-    box.TextColor3 = Color3.fromRGB(255, 255, 255)
-    box.TextSize = 12
-    box.Font = Enum.Font.GothamBold
-    box.Text = tostring(startH)
-    box.ClearTextOnFocus = false
-    box.Parent = card
-    addCorner(box, 6)
-
-    local track = Instance.new("TextButton")
-    track.Size = UDim2.new(1, -24, 0, 8)
-    track.Position = UDim2.new(0, 12, 1, -14)
-    track.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
-    track.BorderSizePixel = 0
-    track.Text = ""
-    track.AutoButtonColor = false
-    track.Parent = card
-    addCorner(track, 4)
-
-    local fill = Instance.new("Frame")
-    fill.Size = UDim2.new(startH / MAXH, 0, 1, 0)
-    fill.BackgroundColor3 = BANANA_YELLOW
-    fill.BorderSizePixel = 0
-    fill.Parent = track
-    addCorner(fill, 4)
-
-    local function showH(v)   -- chỉ cập nhật hiển thị (không ghi giá trị)
-        box.Text = tostring(v)
-        fill.Size = UDim2.new(math.clamp(v, 0, MAXH) / MAXH, 0, 1, 0)
-    end
-    _G.MHRaidHeightUI = showH
-    local function setH(v)
-        v = math.clamp(math.floor(v), 0, MAXH)
-        farmDistanceHeight = v
-        showH(v)
-        if _G.MHFarmHeightUI then pcall(_G.MHFarmHeightUI, v) end   -- đẩy sang thanh trong tab Config
-    end
-    local dragging = false
-    local function fromX(x)
-        local w = track.AbsoluteSize.X
-        if w <= 0 then return end
-        setH(math.clamp((x - track.AbsolutePosition.X) / w, 0, 1) * MAXH)
-    end
-    track.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true
-            fromX(input.Position.X)
-        end
-    end)
-    UserInputService.InputChanged:Connect(function(input)
-        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-            fromX(input.Position.X)
-        end
-    end)
-    UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = false
-        end
-    end)
-    box.FocusLost:Connect(function()
-        local n = tonumber(box.Text)
-        if n then setH(n) else box.Text = tostring(farmDistanceHeight) end
-    end)
-end)()
+-- Đã bỏ thanh Farm Height khỏi tab Raid theo yêu cầu.
 
 _G.MinhHubLoad(38, "Loading Auto Raid...")
 -- =========================================================
@@ -4884,12 +5769,9 @@ local RAID_FIXED = {
 }
 _G.MHRaidFixed = RAID_FIXED
 
--- Độ cao đứng trên quái khi Raid: THEO thanh "Độ cao Farm" (trước đây cố định 35, kéo thanh không có tác dụng)
+-- Độ cao Raid dùng giá trị nội bộ cố định; không còn phụ thuộc thanh Farm Height của tab khác.
 function RAID_FIXED.height()
-    -- Đọc trực tiếp giá trị thanh Farm Height; cho phép đặt 0 để farm sát mục tiêu.
-    local h = tonumber(farmDistanceHeight)  -- dùng chung thanh Farm Height (đồng bộ với thanh trong tab Raid)
-    if h == nil then h = tonumber(RAID_FIXED.lockHeight) or 35 end
-    return math.clamp(h, 0, 100)
+    return math.clamp(tonumber(RAID_FIXED.lockHeight) or 35, 0, 100)
 end
 
 
@@ -5416,7 +6298,6 @@ local function raidFlyTo(targetCFrame, speed, keepGoing)
     end
 
     local duration = math.max(0.12, distance / spd)
-    local deadline = tick() + duration + 3
 
     local tween = TweenService:Create(
         hrp,
@@ -5425,6 +6306,8 @@ local function raidFlyTo(targetCFrame, speed, keepGoing)
     )
     RAID_FIXED.flightTween = tween
     tween:Play()
+    -- newFlyTween sets this flag synchronously if it selected a portal route.
+    local deadline = tick() + duration + (tween.__MHPortalRouted and 45 or 3)
 
     while myToken == RAID_FIXED.flightToken and tick() < deadline do
         if keepGoing and not keepGoing() then
@@ -7122,7 +8005,7 @@ valueBox.FocusLost:Connect(function()
     end
 end)
 
-createToggleFeature(settingsPage, nil, "Bring Mob", "Gather nearby mobs into one location", 16, bringMobsEnabled, function(state) 
+createToggleFeature(settingsPage, nil, "Bring Mob", "Gather nearby mobs into one location", 17, bringMobsEnabled, function(state) 
     bringMobsEnabled = state 
 end)
 
@@ -7173,7 +8056,7 @@ local function createInputFeature(parentPage, title, defaultVal, layoutOrder, ca
     end)
 end
 
-createInputFeature(settingsPage, "Bring Mob Count", maxBringCount, 17, function(val)
+createInputFeature(settingsPage, "Bring Mob Count", maxBringCount, 18, function(val)
     maxBringCount = val
 end)
 
@@ -7310,7 +8193,7 @@ end)
     refreshTeamStatus()
 
     createToggleFeature(settingsPage, "AutoSelectTeamToggle", "Auto Select Team",
-        "Automatically select the team marked above (Pirates or Marines)", 3, teamState.enabled, function(state)
+        "Automatically select the team marked above (Pirates or Marines)", 5, teamState.enabled, function(state)
             teamState.enabled = state
             _G.MinhHubAutoSelectTeam = state
             teamState.lastAttempt = 0
@@ -7559,7 +8442,7 @@ createInputFeature(settingsPage, "Fast Attack Targets", maxAttackTargets, 13, fu
     maxAttackTargets = math.clamp(math.floor(tonumber(val) or 2), 1, 6)
 end)
 createToggleFeature(settingsPage, nil, "Fast Attack Players", "Fast-attack nearby players alongside mobs", 14, FA.playerEnabled, function(state) FA.playerEnabled = state end)
-createToggleFeature(settingsPage, "AutoClickGunToggle", "Auto Click Gun", "Fire the gun via remote + tool activation (no screen click)", 14, true, function(state)
+createToggleFeature(settingsPage, "AutoClickGunToggle", "Auto Click Gun", "Fire the gun via remote + tool activation (no screen click)", 16, true, function(state)
     FA.gunClickEnabled = state
 end)
 createToggleFeature(settingsPage, nil, "Auto Fast Attack", "Enable Fast Attack while farming and attack targets in range automatically", 12, FA.auto, function(state)
@@ -7976,7 +8859,7 @@ end
 
 -- NOCLIP LOGIC
 RunService.Stepped:Connect(function()
-    if autoFarmEnabled or autoFarmMaterialEnabled or autoRaidEnabled or _G.Dungeon or _G.AutoLawRaid or autoChestEnabled or _G.FruitPickupBusy or _G.PirateRaidBusy or _G.EliteHunter or _G.TyrantFarm or _G.TyrantSummon or (Q.SUB and Q.SUB.force) or (_G.__FlyN or 0) > 0 or _G.BuyMeleeActive == true then
+    if autoFarmEnabled or autoFarmMaterialEnabled or autoRaidEnabled or _G.Dungeon or _G.AutoLawRaid or _G.AutoUnlockSeaBusy or autoChestEnabled or _G.FruitPickupBusy or _G.PirateRaidBusy or _G.EliteHunter or _G.TyrantFarm or _G.TyrantSummon or (Q.SUB and Q.SUB.force) or (_G.__FlyN or 0) > 0 or _G.BuyMeleeActive == true then
         local character = LocalPlayer.Character
         if character then
             local nc = Q.NC
@@ -8457,6 +9340,26 @@ _G.FlyStraight = function(getTarget, speed, keepGoing, arriveDist)
     local hrp  = char and char:FindFirstChild("HumanoidRootPart")
     local hum  = char and char:FindFirstChildOfClass("Humanoid")
     if not hrp or not hum or hum.Health <= 0 then return false end
+
+    -- Auto Pickup Fruit / Pirate Raid also pass through the shared Third Sea portal router.
+    if Q and Q.ThirdSeaPortals and not _G.__MHThirdSeaPortalBypass then
+        local okTarget, targetPos = pcall(getTarget)
+        if okTarget and typeof(targetPos) == "Vector3" then
+            local okPlan, plan = pcall(function()
+                return Q.ThirdSeaPortals.makePlan(hrp.Position, targetPos)
+            end)
+            if okPlan and plan then
+                stopAllFlying()
+                return Q.ThirdSeaPortals.execute(hrp, CFrame.new(targetPos), speed, function()
+                    if keepGoing and not keepGoing() then return false end
+                    local c = LocalPlayer.Character
+                    local r = c and c:FindFirstChild("HumanoidRootPart")
+                    local h = c and c:FindFirstChildOfClass("Humanoid")
+                    return r ~= nil and h ~= nil and h.Health > 0
+                end, plan)
+            end
+        end
+    end
 
     stopAllFlying() -- huỷ mọi Tween đang điều khiển nhân vật
     local pos = hrp.Position
@@ -9730,11 +10633,6 @@ _G.MinhHubLoad(54, "Đang tải tab ESP...")
 
     -- ===== TAB ESP trong menu =====
     local espPage = createTab("ESP", "👁️", false)
-    -- đưa tab ESP lên trước tab Config trong sidebar
-    pcall(function()
-        tabs["ESP"].Button.LayoutOrder = 1
-        if tabs["Config"] then tabs["Config"].Button.LayoutOrder = 2 end
-    end)
 
     createToggleFeature(espPage, "ESPPlayerToggle", "ESP Player", "Show other players’ names, level, health, and distance (red: Pirates, blue: Marines)", 1, _G.ESP_Player, function(state)
         _G.ESP_Player = state
@@ -9799,14 +10697,13 @@ _G.MHSpawn(function()
     end
 end)
 
--- LOGIC AUTO STORE FRUIT v2
--- Sửa lỗi: server nhận tên "gốc" của trái (thuộc tính OriginalName) chứ không phải Tool.Name, nên bản cũ gọi
--- StoreFruit bằng tên sai và không bao giờ cất được. Giờ thử lần lượt các tên có thể, kiểm tra trái đã biến mất
--- khỏi người chơi chưa; nếu remote vẫn không được thì làm như ảnh hướng dẫn: cầm trái -> bấm "Store" trong hộp thoại.
+-- LOGIC AUTO STORE FRUIT v3: quét thông minh, chống spam, không cần equip trái
 _G.StoreFruitStatus = "Disabled"
 _G.MHSpawn(function()
-    local failCount = setmetatable({}, {__mode = "k"})  -- số vòng thất bại mỗi Tool
-    local skipUntil = setmetatable({}, {__mode = "k"})  -- bỏ qua tạm thời Tool không cất được
+    local failCount = setmetatable({}, {__mode = "k"})
+    local retryAt = setmetatable({}, {__mode = "k"})
+    local inFlight = setmetatable({}, {__mode = "k"})
+    local lastAttemptAt = 0
 
     local function setStatus(t)
         if _G.StoreFruitStatus ~= t then
@@ -9816,147 +10713,136 @@ _G.MHSpawn(function()
     end
 
     local function stillOwned(tool)
-        local char = LocalPlayer.Character
+        if not tool or not tool.Parent then return false end
         local bp = LocalPlayer:FindFirstChild("Backpack")
-        return tool.Parent ~= nil and ((bp and tool:IsDescendantOf(bp)) or (char and tool:IsDescendantOf(char)))
-    end
-
-    local function guiVisible(obj, pg)
-        local g = obj
-        while g and g ~= pg do
-            if g:IsA("GuiObject") and not g.Visible then return false end
-            if g:IsA("ScreenGui") and not g.Enabled then return false end
-            g = g.Parent
-        end
-        return true
-    end
-
-    -- Cách dự phòng: cầm trái, click để hiện hộp thoại Eat/Drop/Store/Nevermind rồi bấm đúng nút "Store"
-    local function storeViaDialog(tool)
         local char = LocalPlayer.Character
-        local hum = char and char:FindFirstChildOfClass("Humanoid")
-        local pg = LocalPlayer:FindFirstChild("PlayerGui")
-        if not hum or not pg then return false end
+        return (bp and tool:IsDescendantOf(bp)) or (char and tool:IsDescendantOf(char)) or false
+    end
 
-        pcall(function() hum:EquipTool(tool) end)
-        task.wait(0.35)
-        pcall(function() tool:Activate() end)
-
-        local deadline = tick() + 3
-        while tick() < deadline and stillOwned(tool) do
-            local storeBtn
-            for _, d in ipairs(pg:GetDescendants()) do
-                if (d:IsA("TextButton") or d:IsA("ImageButton")) and guiVisible(d, pg) then
-                    local t = ""
-                    pcall(function()
-                        if d:IsA("TextButton") then t = d.Text end
-                        for _, c in ipairs(d:GetDescendants()) do
-                            if c:IsA("TextLabel") or c:IsA("TextButton") then t = t .. " " .. c.Text end
-                        end
-                    end)
-                    if string.lower(t):match("^%s*store%s*$") then storeBtn = d; break end
+    local function getFruitNames(tool)
+        local names, seen = {}, {}
+        local function add(value)
+            if type(value) == "string" then
+                value = value:gsub("^%s+", ""):gsub("%s+$", "")
+                if value ~= "" and not seen[value] then
+                    seen[value] = true
+                    names[#names + 1] = value
                 end
             end
-
-            if storeBtn then
-                pcall(function()
-                    local vim = game:GetService("VirtualInputManager")
-                    local inset = game:GetService("GuiService"):GetGuiInset()
-                    local pos = storeBtn.AbsolutePosition + storeBtn.AbsoluteSize / 2
-                    vim:SendMouseButtonEvent(pos.X, pos.Y + inset.Y, 0, true, game, 0)
-                    task.wait(0.05)
-                    vim:SendMouseButtonEvent(pos.X, pos.Y + inset.Y, 0, false, game, 0)
-                end)
-                task.wait(0.6)
-                break
-            end
-            task.wait(0.3)
         end
-        return not stillOwned(tool)
+        -- Ưu tiên tên chuẩn do game gắn, sau đó mới thử tên Tool.
+        pcall(function() add(tool:GetAttribute("OriginalName")) end)
+        pcall(function() add(tool:GetAttribute("FruitName")) end)
+        pcall(function()
+            local fruitValue = tool:FindFirstChild("FruitName")
+            if fruitValue and (fruitValue:IsA("StringValue") or fruitValue:IsA("TextValue")) then add(fruitValue.Value) end
+        end)
+        add(tool.Name)
+        add((tool.Name:gsub(" Fruit$", "")))
+        return names
     end
 
     local function storeTool(commF, tool)
-        local until_ = skipUntil[tool]
-        if until_ and tick() < until_ then return end
+        if not tool or not tool:IsA("Tool") or not stillOwned(tool) then return end
+        if not (_G.IsFruitTool and _G.IsFruitTool(tool)) then return end
+        if inFlight[tool] then return end
+        if retryAt[tool] and tick() < retryAt[tool] then return end
+        -- Giới hạn tốc độ tổng thể để tránh spam RemoteFunction và làm giật game.
+        if tick() - lastAttemptAt < 0.65 then return end
 
-        local char = LocalPlayer.Character
-        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        inFlight[tool] = true
+        lastAttemptAt = tick()
+        local names = getFruitNames(tool)
+        local lastResult = "server không trả kết quả"
+        local confirmed = false
 
-        -- Bỏ trái đang cầm về Backpack trước
-        if char and tool.Parent == char and hum then
-            pcall(function() hum:UnequipTools() end)
-            task.wait(0.2)
-        end
-
-        -- Các tên khả dĩ mà server chấp nhận (không trùng nhau)
-        local candidates, seen = {}, {}
-        local function add(n)
-            if type(n) == "string" and n ~= "" and not seen[n] then
-                seen[n] = true
-                candidates[#candidates + 1] = n
+        -- Không equip/activate/click trái. Thử các kiểu tham số thường dùng,
+        -- luôn giữ Tool trong Backpack nếu nó chưa được cầm.
+        for _, fruitName in ipairs(names) do
+            local attempts = {
+                {"StoreFruit", fruitName, tool},
+                {"StoreFruit", fruitName},
+            }
+            for _, args in ipairs(attempts) do
+                if not stillOwned(tool) then confirmed = true; break end
+                local ok, result = pcall(function()
+                    return commF:InvokeServer(table.unpack(args))
+                end)
+                if ok then
+                    lastResult = result == nil and "nil" or tostring(result)
+                else
+                    lastResult = "lỗi remote: " .. tostring(result)
+                end
+                -- Chờ server cập nhật Backpack trước khi quyết định thử tên/kiểu khác.
+                local deadline = tick() + 0.75
+                repeat
+                    task.wait(0.1)
+                    if not stillOwned(tool) then confirmed = true; break end
+                until tick() >= deadline
+                if confirmed then break end
             end
-        end
-        add(tool:GetAttribute("OriginalName"))
-        add(tool:GetAttribute("FruitName"))
-        add(tool.Name)
-        add((string.gsub(tool.Name, " Fruit$", "")))
-
-        local lastResult = nil
-        for _, nm in ipairs(candidates) do
-            local ok, res = pcall(function() return commF:InvokeServer("StoreFruit", nm, tool) end)
-            lastResult = ok and res or ("lỗi: " .. tostring(res))
-            task.wait(0.4)
-            if not stillOwned(tool) then
-                setStatus("✅ Đã cất: " .. tool.Name .. " (tên gửi: " .. nm .. ")")
-                failCount[tool] = nil
-                return
-            end
+            if confirmed then break end
         end
 
-        failCount[tool] = (failCount[tool] or 0) + 1
-        local reason = (type(lastResult) == "string" and lastResult) or (lastResult ~= nil and tostring(lastResult)) or "không rõ"
-        setStatus("⚠️ Remote không cất được " .. tool.Name .. " (server trả: " .. reason .. ")")
-
-        -- Remote thất bại 2 vòng liên tiếp -> dùng hộp thoại Store
-        if failCount[tool] >= 2 then
-            if storeViaDialog(tool) then
-                setStatus("✅ Đã cất bằng hộp thoại: " .. tool.Name)
-                failCount[tool] = nil
-            elseif failCount[tool] >= 4 then
-                skipUntil[tool] = tick() + 60
-                failCount[tool] = nil
-                setStatus("❌ Không cất được " .. tool.Name .. " - kho đầy? Bỏ qua 60 giây")
-            end
+        if confirmed or not stillOwned(tool) then
+            setStatus("✅ Đã xác nhận cất trái: " .. tool.Name)
+            failCount[tool] = nil
+            retryAt[tool] = nil
+        else
+            failCount[tool] = (failCount[tool] or 0) + 1
+            local tries = failCount[tool]
+            local delay = math.min(60, 5 * (2 ^ math.min(tries - 1, 3)))
+            retryAt[tool] = tick() + delay
+            setStatus("⚠️ Chưa xác nhận cất được " .. tool.Name .. " — phản hồi: " .. lastResult .. "; thử lại sau " .. delay .. " giây")
         end
+        inFlight[tool] = nil
     end
 
-    while task.wait(1) do
+    while task.wait(0.8) do
         if autoStoreFruitEnabled then
-            pcall(function()
+            local okLoop, err = pcall(function()
                 local remotes = ReplicatedStorage:FindFirstChild("Remotes")
                 local commF = remotes and remotes:FindFirstChild("CommF_")
-                if not commF then setStatus("Không thấy Remotes.CommF_"); return end
-
-                -- Không cất trái khi đang bay đi nhặt / đang mua ở NPC
-                if _G.FruitPickupBusy then return end
+                if not commF or not commF:IsA("RemoteFunction") then
+                    setStatus("Không thấy RemoteFunction Remotes.CommF_")
+                    return
+                end
+                -- Nhường quyền cho luồng nhặt/mua trái để tránh hai chức năng đụng nhau.
+                if _G.FruitPickupBusy or _G.AutoRandomFruitBusy then return end
 
                 local list = {}
                 local backpack = LocalPlayer:FindFirstChild("Backpack")
                 local char = LocalPlayer.Character
-                if backpack then for _, t in ipairs(backpack:GetChildren()) do list[#list + 1] = t end end
-                if char then for _, t in ipairs(char:GetChildren()) do list[#list + 1] = t end end
-
-                local found = false
-                for _, tool in ipairs(list) do
-                    if _G.IsFruitTool and _G.IsFruitTool(tool) and tool.Parent then
-                        found = true
-                        storeTool(commF, tool)
+                if backpack then
+                    for _, obj in ipairs(backpack:GetChildren()) do
+                        if obj:IsA("Tool") and _G.IsFruitTool and _G.IsFruitTool(obj) then
+                            list[#list + 1] = obj
+                        end
                     end
                 end
-                if not found then setStatus("Chờ trái ác quỷ trong Backpack...") end
+                if char then
+                    for _, obj in ipairs(char:GetChildren()) do
+                        if obj:IsA("Tool") and _G.IsFruitTool and _G.IsFruitTool(obj) then
+                            list[#list + 1] = obj
+                        end
+                    end
+                end
+
+                if #list == 0 then
+                    setStatus("Đang chờ trái ác quỷ trong Backpack...")
+                    return
+                end
+                for _, tool in ipairs(list) do
+                    if autoStoreFruitEnabled then storeTool(commF, tool) end
+                    task.wait(0.15)
+                end
             end)
+            if not okLoop then
+                setStatus("Lỗi Auto Store Fruit: " .. tostring(err))
+                task.wait(1.5)
+            end
         else
-            _G.StoreFruitStatus = "Disabled"
+            if _G.StoreFruitStatus ~= "Disabled" then _G.StoreFruitStatus = "Disabled" end
         end
     end
 end)
@@ -10702,6 +11588,7 @@ function FA.isFarming()
         or autoRaidEnabled
         or _G.Dungeon
         or _G.AutoLawRaid
+        or _G.AutoUnlockSeaBusy
         or _G.PirateRaidFarm
         or _G.EliteHunter
         or _G.TyrantFarm
@@ -11034,6 +11921,99 @@ function FA.hoverSet(hrp, pos)
     local nxt = (d > 25) and pos or cur:Lerp(pos, 0.45)
     hrp.CFrame = CFrame.new(nxt) * CFrame.fromOrientation(0, yaw, 0)
 end
+
+-- [MỚI] AUTO DODGE (né chiêu quái / boss): tự nâng độ cao đứng farm trong thời gian ngắn khi
+--   (1) phát hiện quái/boss gần đó đang tung chiêu (animation hành động không lặp), hoặc
+--   (2) vừa bị mất máu đột ngột, hoặc
+--   (3) máu thấp (< 30%) -> bay cao hơn tới khi hồi lại > 55%.
+-- Cách làm: bọc FA.hoverH() cộng thêm độ cao; mọi chế độ farm đang dùng FA.hoverH() (Auto Farm, Boss, Elite, Tyrant, Law Raid...)
+-- đều tự hưởng. Chỉnh được bằng _G.DodgeExtraHeight (mặc định 45) và _G.DodgeSeconds (mặc định 1.2).
+;(function()
+    local DG = { until_ = 0, low = false, lastHp = nil, status = "off" }
+    _G.MHDodge = DG
+    local ACTION = {
+        [Enum.AnimationPriority.Action] = true,
+        [Enum.AnimationPriority.Action2] = true,
+        [Enum.AnimationPriority.Action3] = true,
+        [Enum.AnimationPriority.Action4] = true,
+    }
+
+    local origH = FA.hoverH
+    FA.hoverH = function()
+        local h = origH()
+        if _G.AutoDodge then
+            if DG.low then
+                h = h + (tonumber(_G.DodgeExtraHeight) or 45) + 40
+            elseif tick() < DG.until_ then
+                h = h + (tonumber(_G.DodgeExtraHeight) or 45)
+            end
+        end
+        return h
+    end
+
+    local function trigger(sec, why)
+        local t = tick() + (sec or tonumber(_G.DodgeSeconds) or 1.2)
+        if t > DG.until_ then DG.until_ = t end
+        DG.status = why
+    end
+
+    -- quái / boss gần đó đang tung chiêu?
+    local function enemyAttacking(hrp)
+        local ef = workspace:FindFirstChild("Enemies")
+        if not ef then return false end
+        local checked = 0
+        for _, m in ipairs(ef:GetChildren()) do
+            local mh = m:FindFirstChild("HumanoidRootPart")
+            if mh and (mh.Position - hrp.Position).Magnitude <= 60 then
+                local hum = m:FindFirstChildOfClass("Humanoid")
+                if hum and hum.Health > 0 then
+                    local animator = hum:FindFirstChildOfClass("Animator")
+                    if animator then
+                        for _, tr in ipairs(animator:GetPlayingAnimationTracks()) do
+                            if ACTION[tr.Priority] and not tr.Looped then return true, m end
+                        end
+                    end
+                    checked = checked + 1
+                    if checked >= 10 then break end
+                end
+            end
+        end
+        return false
+    end
+
+    _G.MHSpawn(function()
+        while task.wait(0.15) do
+            if _G.AutoDodge then
+                pcall(function()
+                    local char = LocalPlayer.Character
+                    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                    local hum = char and char:FindFirstChildOfClass("Humanoid")
+                    if not hrp or not hum or hum.Health <= 0 then DG.lastHp = nil; DG.low = false; return end
+                    local frac = hum.Health / math.max(hum.MaxHealth, 1)
+                    -- máu thấp: lên cao tới khi hồi
+                    if frac < 0.30 then DG.low = true elseif frac > 0.55 then DG.low = false end
+                    -- mất máu đột ngột
+                    if DG.lastHp and (DG.lastHp - hum.Health) >= hum.MaxHealth * 0.04 then
+                        trigger(nil, "bị đánh trúng -> né")
+                    end
+                    DG.lastHp = hum.Health
+                    -- quái đang ra chiêu
+                    local atk, who = enemyAttacking(hrp)
+                    if atk then trigger(0.8, "né chiêu " .. tostring(who and who.Name or "?")) end
+                    if DG.low then DG.status = "máu thấp - đứng cao chờ hồi" end
+                end)
+            else
+                DG.low = false; DG.until_ = 0; DG.lastHp = nil
+            end
+        end
+    end)
+
+    createToggleFeature(settingsPage, "AutoDodgeToggle", "Auto Dodge (Mob / Boss)",
+        "Rise out of range when a mob/boss attacks, when you take damage, or when HP is low", 19, false, function(state)
+        _G.AutoDodge = state
+        if not state then DG.low = false; DG.until_ = 0 end
+    end)
+end)()
 
 -- Vòng lặp riêng giúp Fast Attack không phụ thuộc FPS của Heartbeat.
 _G.MHSpawn(function()
@@ -11752,6 +12732,363 @@ _G.MHSpawn(function()
         end
     end
 end)
+
+-- [MỚI] AUTO LAW RAID (SEA 2): công tắc "Auto Law Raid" ở tab Raid trước đây chỉ gán cờ _G.AutoLawRaid mà không có logic.
+-- Quy trình: nếu Boss "Order" (Law) chưa xuất hiện -> mua Microchip, bay tới đảo Raid (Circle Island) và bấm nút RaidSummon.
+-- Khi Order xuất hiện -> bay tới, treo trên đầu và đánh bằng Fast Attack. LƯU Ý: tên remote/nút có thể thay đổi theo bản game.
+;(function()
+    local LAW = { status = "Disabled", lastBuy = 0, lastClick = 0, hover = nil, goal = nil }
+    _G.MHLaw = LAW
+
+    local function findOrder()
+        local ef = workspace:FindFirstChild("Enemies")
+        if not ef then return nil end
+        for _, m in ipairs(ef:GetChildren()) do
+            if string.lower(m.Name) == "order" then
+                local hum = m:FindFirstChildOfClass("Humanoid")
+                local hrp = m:FindFirstChild("HumanoidRootPart")
+                if hum and hrp and hum.Health > 0 then return m end
+            end
+        end
+        return nil
+    end
+
+    local function hasChip()
+        for _, c in ipairs({LocalPlayer.Backpack, LocalPlayer.Character}) do
+            if c and (c:FindFirstChild("Microchip") or c:FindFirstChild("Special Microchip")) then return true end
+        end
+        return false
+    end
+
+    -- Tìm ClickDetector của nút triệu hồi Order trên Circle Island (không lấy RaidSummon2 của Raid thường)
+    local function findLawButton()
+        local map = workspace:FindFirstChild("Map")
+        local circle = map and map:FindFirstChild("CircleIsland")
+        local summon = circle and circle:FindFirstChild("RaidSummon")
+        if not summon then return nil end
+        local det = summon:FindFirstChildWhichIsA("ClickDetector", true)
+        return det
+    end
+
+    -- Bám mục tiêu / bay tới điểm (cùng kiểu với Tyrant/Elite)
+    RunService.Heartbeat:Connect(function(dt)
+        if not _G.AutoLawRaid then return end
+        local char = LocalPlayer.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+        local goal
+        local m = LAW.hover
+        if m and m.Parent then
+            local mh = m:FindFirstChild("HumanoidRootPart")
+            if mh then goal = mh.Position + Vector3.new(0, FA.hoverH(), 0) end
+        end
+        goal = goal or LAW.goal
+        if not goal then return end
+        local cur = hrp.Position
+        local delta = goal - cur
+        local dist = delta.Magnitude
+        local newPos
+        if dist <= 1.5 then newPos = goal
+        else newPos = cur + delta.Unit * math.min(dist, (flySpeed or 190) * math.min(dt, 0.05)) end
+        hrp.CFrame = (hrp.CFrame - hrp.CFrame.Position) + newPos
+        hrp.AssemblyLinearVelocity = Vector3.zero
+        hrp.AssemblyAngularVelocity = Vector3.zero
+    end)
+
+    _G.MHSpawn(function()
+        while task.wait(0.25) do
+            if _G.AutoLawRaid and World2 then
+                pcall(function()
+                    local char = LocalPlayer.Character
+                    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                    local hum = char and char:FindFirstChildOfClass("Humanoid")
+                    if not hrp or not hum or hum.Health <= 0 then LAW.hover = nil; LAW.goal = nil; return end
+                    if currentFlyTween then pcall(function() currentFlyTween:Cancel() end); currentFlyTween = nil end
+                    pcall(equipSelectedWeapon)
+
+                    local boss = findOrder()
+                    if boss then
+                        LAW.hover = boss; LAW.goal = nil
+                        targetEnemy = boss
+                        LAW.status = "Fighting Order (Law)"
+                        return
+                    end
+                    LAW.hover = nil
+                    targetEnemy = nil
+
+                    local det = findLawButton()
+                    if not det then
+                        -- nút chưa được stream: yêu cầu server tải map quanh Circle Island rồi bay tới
+                        local pos = Vector3.new(-5400, 315, -2700)
+                        _G.MHSpawn(function() pcall(function() LocalPlayer:RequestStreamAroundAsync(pos) end) end)
+                        LAW.goal = pos
+                        LAW.status = "Flying to Circle Island..."
+                        return
+                    end
+                    local btn = det.Parent
+                    local bpos = btn:IsA("BasePart") and btn.Position or (btn:FindFirstChildWhichIsA("BasePart", true) or hrp).Position
+                    LAW.goal = bpos + Vector3.new(0, 4, 0)
+
+                    if not hasChip() and tick() - LAW.lastBuy > 12 then
+                        LAW.lastBuy = tick()
+                        local commF = getCommF()
+                        if commF then
+                            LAW.status = "Buying Microchip..."
+                            pcall(function() commF:InvokeServer("BlackbeardReward", "Microchip", "2") end)
+                        end
+                    end
+
+                    if (hrp.Position - bpos).Magnitude <= 20 then
+                        if tick() - LAW.lastClick > 3 then
+                            LAW.lastClick = tick()
+                            LAW.status = "Summoning Order..."
+                            if fireclickdetector then pcall(function() fireclickdetector(det) end) end
+                        end
+                    else
+                        LAW.status = "Flying to Law summon button..."
+                    end
+                end)
+            else
+                LAW.hover = nil; LAW.goal = nil
+                if LAW.status ~= "Disabled" then LAW.status = "Disabled" end
+            end
+        end
+    end)
+end)()
+
+-- [MỚI] AUTO UNLOCK SEA (A-Z): tự cày level + làm nhiệm vụ để lên Sea 2 (Second Sea) hoặc Sea 3 (Third Sea).
+--   Sea 1 -> Sea 2: cần Lv 700. Farm level -> nhận Key từ Detective -> mở cửa Ice Castle -> hạ Ice Admiral -> TravelDressrosa.
+--   Sea 2 -> Sea 3: cần Lv 1500. Farm level -> ZQuestProgress Begin -> hạ Don Swan -> TravelZou.
+-- LƯU Ý: tên remote / toạ độ lấy theo các script cộng đồng, có thể lệch theo bản game -> xem trạng thái trong console / thông báo.
+;(function()
+    local SEA = { status = "Disabled", phase = "", startedFarm = false, hover = nil, goal = nil,
+                  lastTravel = 0, lastQuest = 0, bossSeen = false, bossName = nil, lastNotify = "" }
+    _G.MHSea = SEA
+
+    local ICE_DOOR   = Vector3.new(1347.7, 37.4, -1325.6)   -- cửa Ice Castle (dùng Key)
+    local ICE_ROOM   = Vector3.new(1266.1, 30.0, -1359.0)   -- phòng Ice Admiral (gần đúng)
+    local SWAN_POS   = Vector3.new(2286.0, 15.0, 863.0)     -- phòng Don Swan (Kingdom of Rose)
+    local LEVEL_NEED = World1 and 700 or 1500
+
+    local function say(msg)
+        SEA.status = msg
+        if msg ~= SEA.lastNotify then
+            SEA.lastNotify = msg
+            print("[MinhHub][Sea] " .. msg)
+            pcall(function()
+                game:GetService("StarterGui"):SetCore("SendNotification", { Title = "Auto Unlock Sea", Text = msg, Duration = 4 })
+            end)
+        end
+    end
+
+    local function findBoss(name)
+        local ef = workspace:FindFirstChild("Enemies")
+        if not ef then return nil end
+        for _, m in ipairs(ef:GetChildren()) do
+            if string.find(string.lower(m.Name), string.lower(name), 1, true) then
+                local hum = m:FindFirstChildOfClass("Humanoid")
+                local hrp = m:FindFirstChild("HumanoidRootPart")
+                if hum and hrp and hum.Health > 0 then return m end
+            end
+        end
+        return nil
+    end
+
+    local function findTool(name)
+        for _, c in ipairs({LocalPlayer.Character, LocalPlayer.Backpack}) do
+            local t = c and c:FindFirstChild(name)
+            if t then return t end
+        end
+        return nil
+    end
+
+    local function setFarm(on)
+        if on then
+            selectedFarmTarget = "Auto Level"
+            autoQuestEnabled = true
+            pcall(function() farmDropdownLabel.Text = "Target: Auto Level" end)
+            if not autoFarmEnabled then
+                autoFarmEnabled = true
+                SEA.startedFarm = true
+                if toggleUpdateFuncs["AutoFarmTargetToggle"] then pcall(toggleUpdateFuncs["AutoFarmTargetToggle"], true) end
+            end
+        else
+            if autoFarmEnabled then
+                autoFarmEnabled = false
+                if toggleUpdateFuncs["AutoFarmTargetToggle"] then pcall(toggleUpdateFuncs["AutoFarmTargetToggle"], false) end
+            end
+        end
+    end
+
+    local function invoke(...)
+        local commF = getCommF()
+        if not commF then return nil end
+        local args = table.pack(...)
+        local ok, res = pcall(function() return commF:InvokeServer(table.unpack(args, 1, args.n)) end)
+        return ok and res or nil
+    end
+
+    -- Bám mục tiêu / bay tới điểm (cùng kiểu Tyrant / Law Raid)
+    RunService.Heartbeat:Connect(function(dt)
+        if not _G.AutoUnlockSeaBusy then return end
+        local char = LocalPlayer.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+        local goal
+        local m = SEA.hover
+        if m and m.Parent then
+            local mh = m:FindFirstChild("HumanoidRootPart")
+            if mh then goal = mh.Position + Vector3.new(0, FA.hoverH(), 0) end
+        end
+        goal = goal or SEA.goal
+        if not goal then return end
+        local cur = hrp.Position
+        local delta = goal - cur
+        local dist = delta.Magnitude
+        local newPos
+        if dist <= 1.5 then newPos = goal
+        else newPos = cur + delta.Unit * math.min(dist, (flySpeed or 190) * math.min(dt, 0.05)) end
+        hrp.CFrame = (hrp.CFrame - hrp.CFrame.Position) + newPos
+        hrp.AssemblyLinearVelocity = Vector3.zero
+        hrp.AssemblyAngularVelocity = Vector3.zero
+    end)
+
+    local function fightBoss(boss, label)
+        SEA.hover = boss; SEA.goal = nil
+        targetEnemy = boss
+        SEA.bossSeen = true
+        say("Fighting " .. label)
+    end
+
+    local function step()
+        local char = LocalPlayer.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if not hrp or not hum or hum.Health <= 0 then SEA.hover = nil; SEA.goal = nil; return end
+
+        if World3 then
+            say("Bạn đã ở Sea 3 (Third Sea) - không còn sea để mở khoá")
+            _G.AutoUnlockSea = false
+            if toggleUpdateFuncs["AutoUnlockSeaToggle"] then pcall(toggleUpdateFuncs["AutoUnlockSeaToggle"], false) end
+            return
+        end
+
+        local lvl = getLevel()
+        local target = World1 and "Sea 2" or "Sea 3"
+
+        -- 1) Chưa đủ level -> dùng Auto Farm Level có sẵn
+        if lvl < LEVEL_NEED then
+            _G.AutoUnlockSeaBusy = false
+            SEA.hover = nil; SEA.goal = nil
+            setFarm(true)
+            say("Cày level " .. tostring(lvl) .. "/" .. LEVEL_NEED .. " để lên " .. target)
+            return
+        end
+
+        -- 2) Đủ level -> tắt farm thường, làm nhiệm vụ mở sea
+        setFarm(false)
+        _G.AutoUnlockSeaBusy = true
+        pcall(equipSelectedWeapon)
+        if currentFlyTween then pcall(function() currentFlyTween:Cancel() end); currentFlyTween = nil end
+
+        -- thử dịch chuyển ngay (nếu nhiệm vụ đã xong từ trước hoặc vừa xong)
+        if tick() - SEA.lastTravel > 8 and (SEA.bossSeen or SEA.tried) then
+            SEA.lastTravel = tick()
+            say("Thử dịch chuyển sang " .. target .. "...")
+            if World1 then invoke("DressrosaQuestProgress", "Dressrosa"); invoke("TravelDressrosa")
+            else invoke("TravelZou") end
+        end
+
+        if World1 then
+            -- Ice Admiral đang sống -> đánh
+            local boss = findBoss("ice admiral")
+            if boss and not string.find(string.lower(boss.Name), "awakened", 1, true) then
+                fightBoss(boss, "Ice Admiral"); return
+            end
+            SEA.hover = nil; targetEnemy = nil
+            if SEA.bossSeen then
+                -- boss vừa chết -> nhận thưởng / dịch chuyển
+                SEA.bossSeen = false; SEA.tried = true; SEA.lastTravel = 0
+                say("Đã hạ Ice Admiral - dịch chuyển sang Sea 2")
+                return
+            end
+            -- lấy Key từ Detective
+            if not findTool("Key") and tick() - SEA.lastQuest > 6 then
+                SEA.lastQuest = tick()
+                say("Nhận Key từ Detective...")
+                invoke("DressrosaQuestProgress", "Detective")
+            end
+            local key = findTool("Key")
+            if key then
+                if key.Parent ~= char then pcall(function() hum:EquipTool(key) end) end
+                if (hrp.Position - ICE_DOOR).Magnitude > 12 then
+                    SEA.goal = ICE_DOOR + Vector3.new(0, 3, 0)
+                    say("Bay tới cửa Ice Castle với Key...")
+                else
+                    SEA.goal = ICE_ROOM + Vector3.new(0, 20, 0)
+                    SEA.tried = true
+                    say("Mở cửa, chờ Ice Admiral xuất hiện...")
+                end
+            else
+                SEA.goal = nil
+                SEA.tried = true
+                say("Chưa có Key - thử dịch chuyển / chờ Detective...")
+            end
+        else
+            -- Sea 2 -> Sea 3: Don Swan
+            local boss = findBoss("don swan")
+            if boss then fightBoss(boss, "Don Swan"); return end
+            SEA.hover = nil; targetEnemy = nil
+            if SEA.bossSeen then
+                SEA.bossSeen = false; SEA.tried = true; SEA.lastTravel = 0
+                say("Đã hạ Don Swan - dịch chuyển sang Sea 3")
+                return
+            end
+            if tick() - SEA.lastQuest > 8 then
+                SEA.lastQuest = tick()
+                local chk = invoke("ZQuestProgress", "Check")
+                if chk == 0 or chk == nil then invoke("ZQuestProgress", "Begin") end
+                SEA.tried = true
+            end
+            _G.MHSpawn(function() pcall(function() LocalPlayer:RequestStreamAroundAsync(SWAN_POS) end) end)
+            SEA.goal = SWAN_POS + Vector3.new(0, 25, 0)
+            say("Bay tới phòng Don Swan...")
+        end
+    end
+
+    _G.MHSpawn(function()
+        while task.wait(0.3) do
+            if _G.AutoUnlockSea then
+                pcall(step)
+            else
+                _G.AutoUnlockSeaBusy = false
+                SEA.hover = nil; SEA.goal = nil
+            end
+        end
+    end)
+
+    createToggleFeature(farmPage, "AutoUnlockSeaToggle", "Auto Unlock Next Sea (A-Z)",
+        "Auto level to 700/1500, do the quest, beat the boss and travel to Sea 2 / Sea 3", 36, false, function(state)
+        _G.AutoUnlockSea = state
+        if state then
+            SEA.bossSeen = false; SEA.tried = false; SEA.lastTravel = 0; SEA.lastQuest = 0
+            for _, id in ipairs({"AutoFarmMaterialToggle", "AutoFarmBossToggle", "AutoRaidToggle", "AutoEliteHunterToggle", "AutoLawRaidToggle"}) do
+                if toggleUpdateFuncs[id] then pcall(toggleUpdateFuncs[id], false) end
+            end
+            autoFarmMaterialEnabled = false
+            autoRaidEnabled = false
+            _G.Dungeon = false
+            _G.AutoLawRaid = false
+        else
+            _G.AutoUnlockSeaBusy = false
+            SEA.hover = nil; SEA.goal = nil
+            targetEnemy = nil
+            SEA.status = "Disabled"
+            if SEA.startedFarm then setFarm(false); SEA.startedFarm = false end
+            stopAllFlying()
+        end
+    end)
+end)()
 
 -- TỰ ĐỘNG BẬT FAST ATTACK: mỗi lần bắt đầu farm (tắt -> bật) sẽ tự bật lại Fast Attack.
 -- Sau đó bạn vẫn có thể tắt tay trong menu mà không bị ép bật lại.
@@ -14351,7 +15688,7 @@ do
             end
         end)
 
-        tabs["Skills"].Button.LayoutOrder = 9   -- nằm sau tab ESP
+        -- Thứ tự tab Skills được đặt tập trung ở phần khởi tạo sidebar.
     end)
     if not okSk then warn("[Skills] Lỗi tạo tab Skills:", errSk) end
 end
@@ -14575,23 +15912,26 @@ do
             end
         end)
 
-        -- Status là tab đầu tiên và mở sẵn
-        local data = tabs["Status"]
-        data.Button.LayoutOrder = -1
+        -- Trang Server là trang mở mặc định; Status vẫn nằm riêng để xem thông tin chi tiết.
+        -- Reset trạng thái sau khi tất cả tab đã được tạo để tránh tab mặc định bị ghi đè.
+        local data = tabs["Server"] or tabs["Status"] or tabs["Farm"]
         for _, d in pairs(tabs) do
             d.Page.Visible = false
             d.Indicator.Visible = false
             d.Button.TextColor3 = Color3.fromRGB(165, 168, 180)
             d.Button.BackgroundTransparency = 1
         end
-        data.Page.Visible = true
-        data.Indicator.Visible = true
-        data.Button.TextColor3 = Color3.fromRGB(255, 255, 255)
-        data.Button.BackgroundTransparency = 0.9
-        pageTitle.Text = "Status"
+        if data then
+            data.Page.Visible = true
+            data.Indicator.Visible = true
+            data.Button.TextColor3 = Color3.fromRGB(255, 255, 255)
+            data.Button.BackgroundTransparency = 0.9
+            pageTitle.Text = data.Button.Text
+        end
 
-        -- Thứ tự tab giống Maru: Status, Farm Settings, Main, Multi Farm, Raid, Items, Shop, ESP
-        for i, nm in ipairs({"Status", "Config", "Farm", "Boss", "Raid", "Gacha", "Shop", "ESP"}) do
+        -- Thứ tự cố định: tổng quan → farm → boss → raid → vật phẩm → shop
+        -- → kỹ năng → ESP → trạng thái chi tiết → cài đặt.
+        for i, nm in ipairs({"Server", "Farm", "Boss", "Raid", "Gacha", "Shop", "Skills", "ESP", "Status", "Config"}) do
             if tabs[nm] then tabs[nm].Button.LayoutOrder = i end
         end
 
@@ -14619,10 +15959,10 @@ do
         MH.section(gachaPage, "Bones", 0)
         MH.section(gachaPage, "Fruit", 2)
         MH.section(shopPage, "Shop", 0)
-        MH.section(settingsPage, "Weapon & Distance", 0)
-        MH.section(settingsPage, "Fast Attack & Bring Mob", 10)
-        MH.section(settingsPage, "Haki & Race", 20)
-        MH.section(settingsPage, "Misc", 30)
+        MH.section(settingsPage, "Weapon, Flight & Team", 0)
+        MH.section(settingsPage, "Fast Attack, Dodge & Mob", 10)
+        MH.section(settingsPage, "Haki & Race Skills", 20)
+        MH.section(settingsPage, "Movement & Utilities", 30)
         MH.section(settingsPage, "Multi Stats", 40)
         -- MULTI-SELECT STATS: cho phép chọn nhiều nhóm chỉ số cùng lúc
         do
@@ -14730,21 +16070,64 @@ do
             status.TextXAlignment = Enum.TextXAlignment.Left
             status.Parent = panel
 
+            local function getAvailableStatPoints()
+                local data = LocalPlayer:FindFirstChild("Data")
+                local points = data and (data:FindFirstChild("Points") or data:FindFirstChild("StatPoints"))
+                return points and math.max(0, tonumber(points.Value) or 0) or nil
+            end
+
             local function addSelectedPoints()
-                if selectedCount() == 0 then status.Text = "Status: Select at least one stat" return end
+                if selectedCount() == 0 then status.Text = "Status: Select at least one stat" return false end
                 local remotes = ReplicatedStorage:FindFirstChild("Remotes")
                 local commF = remotes and remotes:FindFirstChild("CommF_")
-                if not commF then status.Text = "Status: CommF_ not found" return end
-                local done = 0
+                if not commF then status.Text = "Status: CommF_ not found" return false end
+
+                local available = getAvailableStatPoints()
+                if available == 0 then
+                    status.Text = "Status: Not enough stat points — waiting for points"
+                    status.TextColor3 = Color3.fromRGB(240, 170, 100)
+                    return false
+                end
+
+                local done, spent = 0, 0
                 for _, statName in ipairs(statNames) do
                     if selectedStats[statName] then
+                        available = getAvailableStatPoints()
+                        if available ~= nil and available <= 0 then break end
+                        local amountNow = available and math.min(amount, available) or amount
                         local remoteStat = statName == "Blox Fruit" and "Demon Fruit" or statName
-                        local ok = pcall(function() commF:InvokeServer("AddPoint", remoteStat, amount) end)
-                        if ok then done += 1 end
-                        task.wait(0.12)
+                        local ok, result = pcall(function()
+                            return commF:InvokeServer("AddPoint", remoteStat, amountNow)
+                        end)
+                        task.wait(0.15)
+                        local after = getAvailableStatPoints()
+                        if after ~= nil and available ~= nil then
+                            local delta = math.max(0, available - after)
+                            if delta > 0 then
+                                done += 1
+                                spent += delta
+                            elseif after <= 0 then
+                                break
+                            end
+                        elseif ok and result ~= false then
+                            done += 1
+                            spent += amountNow
+                        end
                     end
                 end
-                status.Text = "Submitted stat allocation for " .. tostring(done) .. "/" .. tostring(selectedCount()) .. " stats (" .. tostring(amount) .. " points per stat)."
+
+                local left = getAvailableStatPoints()
+                if left == 0 then
+                    status.Text = "Status: No stat points left — Auto Stats will wait"
+                    status.TextColor3 = Color3.fromRGB(240, 170, 100)
+                elseif spent > 0 then
+                    status.Text = "Status: Added " .. spent .. " points; remaining " .. tostring(left or "?")
+                    status.TextColor3 = Color3.fromRGB(150, 220, 150)
+                else
+                    status.Text = "Status: No points added; check available stat points"
+                    status.TextColor3 = Color3.fromRGB(240, 170, 100)
+                end
+                return spent > 0
             end
 
             local addBtn = Instance.new("TextButton")
@@ -14781,8 +16164,13 @@ do
                     running = true
                     _G.MHSpawn(function()
                         while autoEnabled do
-                            pcall(addSelectedPoints)
-                            task.wait(1)
+                            local ok, added = pcall(addSelectedPoints)
+                            -- Khi hết điểm thì không spam AddPoint; tự kiểm tra lại thưa hơn.
+                            if not ok or added == false then
+                                task.wait(3)
+                            else
+                                task.wait(0.8)
+                            end
                         end
                         running = false
                     end)
