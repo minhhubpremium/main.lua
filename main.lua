@@ -3464,12 +3464,12 @@ function Q.ClaimCakeQuest()
 end
 
 -- UI HELPERS & THEME CONFIG (MINH HUB STYLE)
-local BANANA_YELLOW       = Color3.fromRGB(0, 174, 255)   -- xanh cyan theo giao diện tham khảo
-local BANANA_DARK         = Color3.fromRGB(37, 40, 49)
-local BANANA_BG           = Color3.fromRGB(20, 21, 27)
-local BANANA_SIDEBAR      = Color3.fromRGB(15, 16, 21)
-local BANANA_CARD         = Color3.fromRGB(34, 35, 42)
-local BANANA_CARD_BORDER  = Color3.fromRGB(59, 62, 72)
+local BANANA_YELLOW       = Color3.fromRGB(0, 170, 255)   -- xanh neon công nghệ (điểm nhấn)
+local BANANA_DARK         = Color3.fromRGB(30, 90, 130)   -- viền cửa sổ
+local BANANA_BG           = Color3.fromRGB(8, 12, 20)
+local BANANA_SIDEBAR      = Color3.fromRGB(5, 8, 14)
+local BANANA_CARD         = Color3.fromRGB(14, 22, 36)
+local BANANA_CARD_BORDER  = Color3.fromRGB(28, 62, 92)
 local BANANA_TEXT_ON      = Color3.fromRGB(255, 255, 255)
 
 local function addCorner(parent, radius)
@@ -3544,14 +3544,14 @@ do
     bananaIcon.Parent = toggleBtn
 end
 
-local MH = { W = 790, H = 460, HEAD = 38, SIDE = 225 }
+local MH = { W = 520, H = 390, HEAD = 34, SIDE = 165 }
 
 local mainFrame = Instance.new("Frame")
 mainFrame.Name = "MainFrame"
 mainFrame.Size = UDim2.new(0, MH.W, 0, MH.H)
 mainFrame.Position = UDim2.new(0.5, -MH.W / 2, 0.5, -MH.H / 2)
 mainFrame.BackgroundColor3 = BANANA_BG
-mainFrame.BackgroundTransparency = 0.12
+mainFrame.BackgroundTransparency = 0.06
 mainFrame.BorderSizePixel = 0
 mainFrame.ClipsDescendants = true
 mainFrame.Visible = true
@@ -3637,27 +3637,6 @@ header.BorderSizePixel = 0
 header.Parent = mainFrame
 
 do
-local headerLogo = Instance.new("Frame")
-headerLogo.Name = "HeaderLogo"
-headerLogo.Size = UDim2.new(0, 26, 0, 26)
-headerLogo.Position = UDim2.new(0, 8, 0, 6)
-headerLogo.BackgroundColor3 = BANANA_SIDEBAR
-headerLogo.BackgroundTransparency = 0.02
-headerLogo.BorderSizePixel = 0
-headerLogo.Parent = header
-addCorner(headerLogo, 6)
-addStroke(headerLogo, BANANA_YELLOW, 1.4)
-local headerLogoText = Instance.new("TextLabel")
-headerLogoText.Size = UDim2.new(1, 0, 1, 0)
-headerLogoText.BackgroundTransparency = 1
-headerLogoText.Text = "M"
-headerLogoText.TextColor3 = BANANA_YELLOW
-headerLogoText.TextSize = 17
-headerLogoText.Font = Enum.Font.GothamBlack
-headerLogoText.Parent = headerLogo
-end
-
-do
     local headLine = Instance.new("Frame")
     headLine.Name = "HeaderLine"
     headLine.Size = UDim2.new(1, 0, 0, 1)
@@ -3669,15 +3648,15 @@ do
 end
 
 local headerTitle = Instance.new("TextLabel")
-headerTitle.Size = UDim2.new(0, 340, 1, 0)
-headerTitle.Position = UDim2.new(0.5, -170, 0, 0)
+headerTitle.Size = UDim2.new(1, -150, 1, 0)
+headerTitle.Position = UDim2.new(0, 12, 0, 0)
 headerTitle.BackgroundTransparency = 1
-headerTitle.Text = "<font color=\"#00B8FF\">MINH HUB</font> <font color=\"#E9EAF0\">: Blox Fruits</font>"
+headerTitle.Text = "MINH_HUB <font color=\"#46D2FF\">//</font> <font color=\"#6F8CA8\">BLOX_FRUITS // PREMIUM</font>"
 headerTitle.RichText = true
 headerTitle.TextColor3 = Color3.fromRGB(235, 237, 245)
-headerTitle.TextSize = 15
-headerTitle.Font = Enum.Font.GothamBold
-headerTitle.TextXAlignment = Enum.TextXAlignment.Center
+headerTitle.TextSize = 12
+headerTitle.Font = Enum.Font.Code
+headerTitle.TextXAlignment = Enum.TextXAlignment.Left
 headerTitle.Parent = header
 
 function MH.winBtn(text, xOff, size)
@@ -3739,7 +3718,7 @@ do
     -- Logo lớn (chữ M cách điệu trong khung thoi) ở đầu thanh bên
     local logoWrap = Instance.new("Frame")
     logoWrap.Name = "LogoWrap"
-    logoWrap.Size = UDim2.new(1, 0, 0, 30)
+    logoWrap.Size = UDim2.new(1, 0, 0, 100)
     logoWrap.LayoutOrder = -100
     logoWrap.BackgroundTransparency = 1
     logoWrap.Parent = sidebar
@@ -3747,7 +3726,7 @@ do
     local diamond = Instance.new("Frame")
     diamond.AnchorPoint = Vector2.new(0.5, 0.5)
     diamond.Position = UDim2.new(0.5, 0, 0.5, 0)
-    diamond.Size = UDim2.new(0, 24, 0, 24)
+    diamond.Size = UDim2.new(0, 62, 0, 62)
     diamond.Rotation = 45
     diamond.BackgroundTransparency = 1
     diamond.Parent = logoWrap
@@ -3759,7 +3738,7 @@ do
     logoText.Size = UDim2.new(1, 0, 1, 0)
     logoText.BackgroundTransparency = 1
     logoText.Text = "M"
-    logoText.TextSize = 22
+    logoText.TextSize = 46
     logoText.Font = Enum.Font.GothamBlack
     logoText.TextColor3 = Color3.fromRGB(255, 255, 255)
     logoText.Parent = logoWrap
@@ -3800,26 +3779,16 @@ pagesFolder.Parent = mainFrame
 
 local tabs = {}
 local function createTab(tabName, iconText, isDefault)
-    -- Tên tab ngắn, dễ hiểu; thứ tự được quản lý tập trung bên dưới.
-    local tabLabel = ({
-        Server = "Server", Farm = "Farm", Boss = "Bosses", Raid = "Raid",
-        Gacha = "Items", Shop = "Shop", Skills = "Skills", ESP = "ESP",
-        Status = "Status", Config = "Settings",
-    })[tabName] or tabName
-    local tabOrder = {
-        Server = 1, Farm = 2, Boss = 3, Raid = 4, Gacha = 5,
-        Shop = 6, Skills = 7, ESP = 8, Status = 9, Config = 10,
-    }
+    local tabLabel = ({Farm = "Main", Boss = "Multi Farm", Gacha = "Items", Config = "Farm Settings"})[tabName] or tabName
     local tabBtn = Instance.new("TextButton")
-    tabBtn.LayoutOrder = tabOrder[tabName] or 99
     tabBtn.Size = UDim2.new(1, -20, 0, 28)
     tabBtn.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
     tabBtn.BackgroundTransparency = isDefault and 0.9 or 1
     tabBtn.AutoButtonColor = false
     tabBtn.Text = tabLabel
     tabBtn.TextColor3 = isDefault and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(165, 168, 180)
-    tabBtn.Font = Enum.Font.GothamMedium
-    tabBtn.TextSize = 13
+    tabBtn.Font = Enum.Font.Code
+    tabBtn.TextSize = 12
     tabBtn.TextXAlignment = Enum.TextXAlignment.Left
     tabBtn.Parent = sidebar
     addCorner(tabBtn, 3)
@@ -3830,7 +3799,7 @@ local function createTab(tabName, iconText, isDefault)
 
     -- biểu tượng đơn sắc bên trái tên tab
     do
-        local iconMap = {Server = "▤", Farm = "⚔", Boss = "♛", Raid = "☄", Gacha = "✦", Shop = "⛁", Config = "⚙", ESP = "◉", Status = "▤", Skills = "✦"}
+        local iconMap = {Farm = "⚔", Boss = "♛", Raid = "☄", Gacha = "✦", Shop = "⛁", Config = "⚙", ESP = "◉", Status = "▤"}
         local ic = Instance.new("TextLabel")
         ic.Size = UDim2.new(0, 22, 1, 0)
         ic.Position = UDim2.new(0, -26, 0, 0)
@@ -3915,155 +3884,12 @@ local function createTab(tabName, iconText, isDefault)
     return page
 end
 
-local farmPage     = createTab("Farm", "⚔️", false)
+local farmPage     = createTab("Farm", "⚔️", true)
 local bossPage     = createTab("Boss", "👑", false)
 local raidPage     = createTab("Raid", "🔥", false)
 local gachaPage    = createTab("Gacha", "🎲", false)
 local shopPage     = createTab("Shop", "🛒", false)
 local settingsPage = createTab("Config", "⚙️", false)
-
--- Trang Server theo mẫu ảnh: các thẻ thông tin tối, thanh tìm kiếm và viền cyan.
-do
-    local serverPage = createTab("Server", "▤", true)
-    local serverStartedAt = os.clock()
-    local function formatServerTime(seconds)
-        seconds = math.max(0, math.floor(tonumber(seconds) or 0))
-        local h = math.floor(seconds / 3600)
-        local m = math.floor((seconds % 3600) / 60)
-        local sec = seconds % 60
-        return string.format("%02dh %02dm %02ds", h, m, sec)
-    end
-
-    local sectionBar = Instance.new("Frame")
-    sectionBar.Name = "ServerSectionHeader"
-    sectionBar.Size = UDim2.new(1, -8, 0, 29)
-    sectionBar.BackgroundColor3 = BANANA_SIDEBAR
-    sectionBar.BackgroundTransparency = 0.15
-    sectionBar.BorderSizePixel = 0
-    sectionBar.LayoutOrder = 1
-    sectionBar.Parent = serverPage
-    addCorner(sectionBar, 5)
-    addStroke(sectionBar, BANANA_CARD_BORDER, 1)
-    local sectionText = Instance.new("TextLabel")
-    sectionText.Size = UDim2.new(1, -12, 1, 0)
-    sectionText.Position = UDim2.new(0, 6, 0, 0)
-    sectionText.BackgroundTransparency = 1
-    sectionText.Text = "Chức Năng Server"
-    sectionText.TextColor3 = Color3.fromRGB(230, 232, 239)
-    sectionText.TextSize = 13
-    sectionText.Font = Enum.Font.GothamBold
-    sectionText.TextXAlignment = Enum.TextXAlignment.Center
-    sectionText.Parent = sectionBar
-    local sectionLine = Instance.new("Frame")
-    sectionLine.Size = UDim2.new(1, -10, 0, 1)
-    sectionLine.Position = UDim2.new(0, 5, 1, -2)
-    sectionLine.BackgroundColor3 = BANANA_YELLOW
-    sectionLine.BackgroundTransparency = 0.35
-    sectionLine.BorderSizePixel = 0
-    sectionLine.Parent = sectionBar
-
-    local function serverInfoCard(title, value, order, height)
-        local card = Instance.new("Frame")
-        card.Name = (title:gsub("[^%w]", "")) .. "Card"
-        card.Size = UDim2.new(1, -8, 0, height or 49)
-        card.BackgroundColor3 = BANANA_CARD
-        card.BackgroundTransparency = 0.08
-        card.BorderSizePixel = 0
-        card.LayoutOrder = order
-        card.Parent = serverPage
-        addCorner(card, 7)
-        local stroke = addStroke(card, BANANA_CARD_BORDER, 1)
-        stroke.Transparency = 0.55
-
-        local titleLabel = Instance.new("TextLabel")
-        titleLabel.Name = "Title"
-        titleLabel.Size = UDim2.new(1, -24, 0, 18)
-        titleLabel.Position = UDim2.new(0, 12, 0, 5)
-        titleLabel.BackgroundTransparency = 1
-        titleLabel.Text = title
-        titleLabel.TextColor3 = Color3.fromRGB(235, 236, 241)
-        titleLabel.TextSize = 12
-        titleLabel.Font = Enum.Font.GothamMedium
-        titleLabel.TextXAlignment = Enum.TextXAlignment.Left
-        titleLabel.Parent = card
-
-        local valueLabel = Instance.new("TextLabel")
-        valueLabel.Name = "Value"
-        valueLabel.Size = UDim2.new(1, -24, 0, (height or 49) - 24)
-        valueLabel.Position = UDim2.new(0, 12, 0, 23)
-        valueLabel.BackgroundTransparency = 1
-        valueLabel.Text = value
-        valueLabel.TextColor3 = Color3.fromRGB(214, 216, 224)
-        valueLabel.TextSize = 12
-        valueLabel.Font = Enum.Font.Gotham
-        valueLabel.TextXAlignment = Enum.TextXAlignment.Left
-        valueLabel.TextYAlignment = Enum.TextYAlignment.Top
-        valueLabel.TextWrapped = true
-        valueLabel.Parent = card
-        return valueLabel
-    end
-
-    local uptimeValue = serverInfoCard("Server Uptime", formatServerTime(workspace.DistributedGameTime), 2, 49)
-    local sessionValue = serverInfoCard("Time in Server", "Từ lúc mở Minh Hub: " .. formatServerTime(0), 3, 49)
-    serverInfoCard("Dự đoán Rương (Fist of Darkness / Chalice)",
-        "Chưa có mốc spawn xác thực; không hiển thị bộ đếm ước đoán.", 4, 67)
-    local placeValue = serverInfoCard("Place ID", tostring(game.PlaceId), 5, 49)
-
-    local jobCard = Instance.new("Frame")
-    jobCard.Name = "JobIDCard"
-    jobCard.Size = UDim2.new(1, -8, 0, 66)
-    jobCard.BackgroundColor3 = BANANA_CARD
-    jobCard.BackgroundTransparency = 0.08
-    jobCard.BorderSizePixel = 0
-    jobCard.LayoutOrder = 6
-    jobCard.Parent = serverPage
-    addCorner(jobCard, 7)
-    local jobStroke = addStroke(jobCard, BANANA_CARD_BORDER, 1)
-    jobStroke.Transparency = 0.55
-    local jobTitle = Instance.new("TextLabel")
-    jobTitle.Size = UDim2.new(1, -24, 0, 18)
-    jobTitle.Position = UDim2.new(0, 12, 0, 5)
-    jobTitle.BackgroundTransparency = 1
-    jobTitle.Text = "JobID"
-    jobTitle.TextColor3 = Color3.fromRGB(235, 236, 241)
-    jobTitle.TextSize = 12
-    jobTitle.Font = Enum.Font.GothamBold
-    jobTitle.TextXAlignment = Enum.TextXAlignment.Left
-    jobTitle.Parent = jobCard
-    local jobBox = Instance.new("TextBox")
-    jobBox.Name = "JobIDInput"
-    jobBox.Size = UDim2.new(1, -16, 0, 30)
-    jobBox.Position = UDim2.new(0, 8, 0, 29)
-    jobBox.BackgroundColor3 = Color3.fromRGB(25, 26, 32)
-    jobBox.BackgroundTransparency = 0.02
-    jobBox.BorderSizePixel = 0
-    jobBox.Text = ""
-    jobBox.PlaceholderText = "Nhập JobID..."
-    jobBox.PlaceholderColor3 = Color3.fromRGB(160, 161, 170)
-    jobBox.TextColor3 = Color3.fromRGB(235, 236, 241)
-    jobBox.TextSize = 12
-    jobBox.Font = Enum.Font.GothamMedium
-    jobBox.ClearTextOnFocus = false
-    jobBox.TextXAlignment = Enum.TextXAlignment.Left
-    jobBox.Parent = jobCard
-    addCorner(jobBox, 5)
-    addStroke(jobBox, Color3.fromRGB(54, 56, 65), 1)
-    local jobPad = Instance.new("UIPadding")
-    jobPad.PaddingLeft = UDim.new(0, 8)
-    jobPad.PaddingRight = UDim.new(0, 8)
-    jobPad.Parent = jobBox
-
-    task.spawn(function()
-        while screenGui.Parent and serverPage.Parent do
-            pcall(function()
-                uptimeValue.Text = formatServerTime(workspace.DistributedGameTime)
-                sessionValue.Text = "Từ lúc mở Minh Hub: " .. formatServerTime(os.clock() - serverStartedAt)
-                placeValue.Text = tostring(game.PlaceId)
-            end)
-            task.wait(1)
-        end
-    end)
-end
 
 -- =========================================================
 -- VIETNAMESE / ENGLISH UI LANGUAGE
@@ -4530,10 +4356,10 @@ end
 do
     local searchWrap = Instance.new("Frame")
     searchWrap.Name = "SearchWrap"
-    searchWrap.Size = UDim2.new(0.92, 0, 0, 32)
+    searchWrap.Size = UDim2.new(0.92, 0, 0, 30)
     searchWrap.LayoutOrder = -10
     searchWrap.BackgroundColor3 = BANANA_CARD
-    searchWrap.Visible = true
+    searchWrap.Visible = false
     searchWrap.Parent = sidebar
     addCorner(searchWrap, 8)
     addStroke(searchWrap, BANANA_CARD_BORDER, 1)
@@ -8005,7 +7831,7 @@ valueBox.FocusLost:Connect(function()
     end
 end)
 
-createToggleFeature(settingsPage, nil, "Bring Mob", "Gather nearby mobs into one location", 17, bringMobsEnabled, function(state) 
+createToggleFeature(settingsPage, nil, "Bring Mob", "Gather nearby mobs into one location", 16, bringMobsEnabled, function(state) 
     bringMobsEnabled = state 
 end)
 
@@ -8056,7 +7882,7 @@ local function createInputFeature(parentPage, title, defaultVal, layoutOrder, ca
     end)
 end
 
-createInputFeature(settingsPage, "Bring Mob Count", maxBringCount, 18, function(val)
+createInputFeature(settingsPage, "Bring Mob Count", maxBringCount, 17, function(val)
     maxBringCount = val
 end)
 
@@ -8193,7 +8019,7 @@ end)
     refreshTeamStatus()
 
     createToggleFeature(settingsPage, "AutoSelectTeamToggle", "Auto Select Team",
-        "Automatically select the team marked above (Pirates or Marines)", 5, teamState.enabled, function(state)
+        "Automatically select the team marked above (Pirates or Marines)", 3, teamState.enabled, function(state)
             teamState.enabled = state
             _G.MinhHubAutoSelectTeam = state
             teamState.lastAttempt = 0
@@ -8442,7 +8268,7 @@ createInputFeature(settingsPage, "Fast Attack Targets", maxAttackTargets, 13, fu
     maxAttackTargets = math.clamp(math.floor(tonumber(val) or 2), 1, 6)
 end)
 createToggleFeature(settingsPage, nil, "Fast Attack Players", "Fast-attack nearby players alongside mobs", 14, FA.playerEnabled, function(state) FA.playerEnabled = state end)
-createToggleFeature(settingsPage, "AutoClickGunToggle", "Auto Click Gun", "Fire the gun via remote + tool activation (no screen click)", 16, true, function(state)
+createToggleFeature(settingsPage, "AutoClickGunToggle", "Auto Click Gun", "Fire the gun via remote + tool activation (no screen click)", 14, true, function(state)
     FA.gunClickEnabled = state
 end)
 createToggleFeature(settingsPage, nil, "Auto Fast Attack", "Enable Fast Attack while farming and attack targets in range automatically", 12, FA.auto, function(state)
@@ -10633,6 +10459,11 @@ _G.MinhHubLoad(54, "Đang tải tab ESP...")
 
     -- ===== TAB ESP trong menu =====
     local espPage = createTab("ESP", "👁️", false)
+    -- đưa tab ESP lên trước tab Config trong sidebar
+    pcall(function()
+        tabs["ESP"].Button.LayoutOrder = 1
+        if tabs["Config"] then tabs["Config"].Button.LayoutOrder = 2 end
+    end)
 
     createToggleFeature(espPage, "ESPPlayerToggle", "ESP Player", "Show other players’ names, level, health, and distance (red: Pirates, blue: Marines)", 1, _G.ESP_Player, function(state)
         _G.ESP_Player = state
@@ -12009,7 +11840,7 @@ end
     end)
 
     createToggleFeature(settingsPage, "AutoDodgeToggle", "Auto Dodge (Mob / Boss)",
-        "Rise out of range when a mob/boss attacks, when you take damage, or when HP is low", 19, false, function(state)
+        "Rise out of range when a mob/boss attacks, when you take damage, or when HP is low", 14, false, function(state)
         _G.AutoDodge = state
         if not state then DG.low = false; DG.until_ = 0 end
     end)
@@ -15688,7 +15519,7 @@ do
             end
         end)
 
-        -- Thứ tự tab Skills được đặt tập trung ở phần khởi tạo sidebar.
+        tabs["Skills"].Button.LayoutOrder = 9   -- nằm sau tab ESP
     end)
     if not okSk then warn("[Skills] Lỗi tạo tab Skills:", errSk) end
 end
@@ -15912,26 +15743,23 @@ do
             end
         end)
 
-        -- Trang Server là trang mở mặc định; Status vẫn nằm riêng để xem thông tin chi tiết.
-        -- Reset trạng thái sau khi tất cả tab đã được tạo để tránh tab mặc định bị ghi đè.
-        local data = tabs["Server"] or tabs["Status"] or tabs["Farm"]
+        -- Status là tab đầu tiên và mở sẵn
+        local data = tabs["Status"]
+        data.Button.LayoutOrder = -1
         for _, d in pairs(tabs) do
             d.Page.Visible = false
             d.Indicator.Visible = false
             d.Button.TextColor3 = Color3.fromRGB(165, 168, 180)
             d.Button.BackgroundTransparency = 1
         end
-        if data then
-            data.Page.Visible = true
-            data.Indicator.Visible = true
-            data.Button.TextColor3 = Color3.fromRGB(255, 255, 255)
-            data.Button.BackgroundTransparency = 0.9
-            pageTitle.Text = data.Button.Text
-        end
+        data.Page.Visible = true
+        data.Indicator.Visible = true
+        data.Button.TextColor3 = Color3.fromRGB(255, 255, 255)
+        data.Button.BackgroundTransparency = 0.9
+        pageTitle.Text = "Status"
 
-        -- Thứ tự cố định: tổng quan → farm → boss → raid → vật phẩm → shop
-        -- → kỹ năng → ESP → trạng thái chi tiết → cài đặt.
-        for i, nm in ipairs({"Server", "Farm", "Boss", "Raid", "Gacha", "Shop", "Skills", "ESP", "Status", "Config"}) do
+        -- Thứ tự tab giống Maru: Status, Farm Settings, Main, Multi Farm, Raid, Items, Shop, ESP
+        for i, nm in ipairs({"Status", "Config", "Farm", "Boss", "Raid", "Gacha", "Shop", "ESP"}) do
             if tabs[nm] then tabs[nm].Button.LayoutOrder = i end
         end
 
@@ -15959,10 +15787,10 @@ do
         MH.section(gachaPage, "Bones", 0)
         MH.section(gachaPage, "Fruit", 2)
         MH.section(shopPage, "Shop", 0)
-        MH.section(settingsPage, "Weapon, Flight & Team", 0)
-        MH.section(settingsPage, "Fast Attack, Dodge & Mob", 10)
-        MH.section(settingsPage, "Haki & Race Skills", 20)
-        MH.section(settingsPage, "Movement & Utilities", 30)
+        MH.section(settingsPage, "Weapon & Distance", 0)
+        MH.section(settingsPage, "Fast Attack & Bring Mob", 10)
+        MH.section(settingsPage, "Haki & Race", 20)
+        MH.section(settingsPage, "Misc", 30)
         MH.section(settingsPage, "Multi Stats", 40)
         -- MULTI-SELECT STATS: cho phép chọn nhiều nhóm chỉ số cùng lúc
         do
