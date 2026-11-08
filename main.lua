@@ -3269,7 +3269,7 @@ local function createTab(tabName, iconText, isDefault)
 
     -- biểu tượng đơn sắc bên trái tên tab
     do
-        local iconMap = {Farm = "⚔", Boss = "♛", Raid = "☄", Gacha = "✦", Shop = "⛁", Config = "⚙", ESP = "◉", Status = "▤", ["Sea Events"] = "🌊"}
+        local iconMap = {Farm = "⚔", Boss = "♛", Raid = "☄", Gacha = "✦", Shop = "⛁", Config = "⚙", ESP = "◉", Status = "▤", SeaEvent = "🌊"}
         local ic = Instance.new("TextLabel")
         ic.Size = UDim2.new(0, 22, 1, 0)
         ic.Position = UDim2.new(0, -26, 0, 0)
@@ -3383,18 +3383,6 @@ do
         {"Redeem Code", "Đổi Code"},
         {"Server Stats", "Thống kê máy chủ"},
         {"Server Events", "Sự kiện máy chủ"},
-        {"Sea Events", "Sự kiện biển"},
-        {"Event Radar", "Radar sự kiện biển"},
-        {"Scan live Sea Events in Sea 2 and Sea 3", "Quét sự kiện biển đang xuất hiện ở Sea 2 và Sea 3"},
-        {"Event Notifications", "Thông báo sự kiện"},
-        {"Notify when a new Sea Event is detected", "Thông báo khi phát hiện sự kiện biển mới"},
-        {"Highlight Event Objects", "Tô sáng đối tượng sự kiện"},
-        {"Highlight detected event models and islands", "Tạo viền sáng cho mô hình quái và đảo sự kiện đã phát hiện"},
-        {"Refresh Scanner", "Quét lại ngay"},
-        {"Waiting for scan...", "Đang chờ quét..."},
-        {"No active Sea Events detected", "Chưa phát hiện sự kiện biển nào đang hoạt động"},
-        {"Event scan only supports Sea 2 and Sea 3", "Trình quét chỉ hỗ trợ Sea 2 và Sea 3"},
-        {"Some events are announced by the game UI and may not expose a model to scan", "Một số sự kiện chỉ thông báo trên giao diện game nên có thể không có mô hình để quét"},
         {"Local Stats", "Thống kê nhân vật"},
         {"Server Time", "Thời gian máy chủ"},
         {"Players", "Người chơi"},
@@ -9252,7 +9240,7 @@ _G.MHSpawn(function()
                     local hum  = char and char:FindFirstChildOfClass("Humanoid")
                     if not hrp or not hum or hum.Health <= 0 then return end
 
-                    if _G.FruitPickupBusy or _G.PirateRaidBusy then return end -- nhường cho Auto Pickup Fruit / Pirate Raid
+                    if _G.FruitPickupBusy or _G.PirateRaidBusy or _G.SeaEventBusy then return end -- nhường cho Auto Pickup Fruit / Pirate Raid / Sea Event
 
                     local function inCursedShip(pos)
                         return World2 and Q.isCursedShipPosition(pos)
@@ -15647,7 +15635,7 @@ _G.MHSpawn(function()
 
     local function pauseTravelModes()
         -- Không bắt đầu giữa lúc một hệ thống khác đang ở giữa thao tác di chuyển.
-        if _G.FruitPickupBusy or _G.PirateRaidBusy or _G.EliteBusy then
+        if _G.FruitPickupBusy or _G.PirateRaidBusy or _G.EliteBusy or _G.SeaEventBusy then
             return nil, "Fruit collection/Raid/Boss activity is in progress. Wait for it to finish and try again."
         end
         if Q.DK and Q.DK.on then
@@ -16022,360 +16010,387 @@ end)
 
 
 -- =========================================================
---   SEA EVENTS RADAR: SEA 2 + SEA 3
---   Chỉ đọc các đối tượng đang được client tải trong Workspace.
---   Không gọi remote, không tự dịch chuyển và không can thiệp vòng lặp farm.
+-- SEA EVENT (Sea 2 / Sea 3): farm Sea Beast / Terror Shark / Piranha / Ship Raid
+-- + tự bay tới đảo sự kiện Mirage / Kitsune / Prehistoric khi chúng xuất hiện.
+-- Dùng chung FlyStraight + targetEnemy (Fast Attack / Bring Mob) như Pirate Raid.
 -- =========================================================
-do
-    local okSeaUI, errSeaUI = pcall(function()
-        local seaEventsPage = createTab("Sea Events", "🌊", false)
-        if tabs["Sea Events"] then
-            tabs["Sea Events"].Button.LayoutOrder = 10
+_G.MHSpawn(function()
+    local okSE, errSE = pcall(function()
+    Q.SE = Q.SE or {
+        on = false,
+        busy = false,
+        status = "Disabled",
+        islandOn = true,
+        beastOn = true,
+        terrorOn = true,
+        piranhaOn = true,
+        shipOn = true,
+        speed = 280,
+        hover = 28,
+        debug = true,
+        lastIsland = nil,
+        lastScan = 0,
+    }
+    _G.SeaEventFarm = false
+    _G.SeaEventBusy = false
+    _G.SeaEventStatus = "Disabled"
+
+    local function slog(...)
+        if Q.SE.debug then print("[SeaEvent]", ...) end
+    end
+
+    local function setStatus(msg)
+        Q.SE.status = tostring(msg)
+        _G.SeaEventStatus = Q.SE.status
+    end
+
+    local function lower(s)
+        return string.lower(tostring(s or ""))
+    end
+
+    local function isAliveModel(m)
+        if not m or not m.Parent then return false end
+        local hum = m:FindFirstChildOfClass("Humanoid")
+        local hrp = m:FindFirstChild("HumanoidRootPart")
+        return hum and hrp and hum.Health > 0 and hrp or false
+    end
+
+    local function classifyMob(name)
+        local n = lower(name)
+        if string.find(n, "terror", 1, true) or string.find(n, "terrorshark", 1, true) then
+            return "TerrorShark"
         end
-
-        local seaRadarEnabled = true
-        local seaNotifyEnabled = true
-        local seaHighlightEnabled = false
-        local scanInitialized = false
-        local previousActive = {}
-        local lastNoticeAt = {}
-        local highlights = {}
-        local eventStatusText
-        local eventListText
-        local eventCountText
-        local scanNow
-
-        local function makePanel(name, height, order)
-            local panel = Instance.new("Frame")
-            panel.Name = name
-            panel.Size = UDim2.new(1, -4, 0, height)
-            panel.BackgroundColor3 = BANANA_CARD
-            panel.BackgroundTransparency = 0.22
-            panel.BorderSizePixel = 0
-            panel.LayoutOrder = order
-            panel.Parent = seaEventsPage
-            addCorner(panel, 8)
-            addStroke(panel, BANANA_CARD_BORDER, 1)
-            return panel
+        if string.find(n, "sea beast", 1, true) or string.find(n, "seabeast", 1, true)
+            or n == "sea beast" or string.find(n, "rumbling", 1, true) then
+            return "SeaBeast"
         end
-
-        local function makeLabel(parent, name, text, pos, size, textSize, color, font)
-            local label = Instance.new("TextLabel")
-            label.Name = name
-            label.Position = pos
-            label.Size = size
-            label.BackgroundTransparency = 1
-            label.Text = text
-            label.TextColor3 = color or Color3.fromRGB(225, 228, 238)
-            label.TextSize = textSize or 11
-            label.Font = font or Enum.Font.Gotham
-            label.TextXAlignment = Enum.TextXAlignment.Left
-            label.TextYAlignment = Enum.TextYAlignment.Top
-            label.TextWrapped = true
-            label.Parent = parent
-            return label
+        if string.find(n, "piranha", 1, true) then
+            return "Piranha"
         end
-
-        local topPanel = makePanel("SeaEventsHeader", 72, 0)
-        makeLabel(topPanel, "Header", "🌊 SEA EVENTS RADAR", UDim2.new(0, 12, 0, 8), UDim2.new(1, -24, 0, 22), 14, BANANA_YELLOW, Enum.Font.GothamBlack)
-        makeLabel(topPanel, "HeaderHint", "Live scanner for Sea 2 and Sea 3", UDim2.new(0, 12, 0, 34), UDim2.new(1, -24, 0, 20), 10, Color3.fromRGB(155, 162, 180), Enum.Font.Gotham)
-
-        createToggleFeature(seaEventsPage, "SeaEventRadarToggle", "Event Radar", "Scan live Sea Events in Sea 2 and Sea 3", 1, true, function(state)
-            seaRadarEnabled = state
-            if not state then
-                eventStatusText.Text = "Radar paused. Turn it on to scan again."
-                eventStatusText.TextColor3 = Color3.fromRGB(155, 162, 180)
-                for object, highlight in pairs(highlights) do
-                    pcall(function() highlight:Destroy() end)
-                    highlights[object] = nil
-                end
-            end
-        end)
-
-        createToggleFeature(seaEventsPage, "SeaEventNotifyToggle", "Event Notifications", "Notify when a new Sea Event is detected", 2, true, function(state)
-            seaNotifyEnabled = state
-        end)
-
-        createToggleFeature(seaEventsPage, "SeaEventHighlightToggle", "Highlight Event Objects", "Highlight detected event models and islands", 3, false, function(state)
-            seaHighlightEnabled = state
-            if not state then
-                for object, highlight in pairs(highlights) do
-                    pcall(function() highlight:Destroy() end)
-                    highlights[object] = nil
-                end
-            end
-        end)
-
-        local statusPanel = makePanel("SeaEventsStatus", 64, 4)
-        makeLabel(statusPanel, "StatusTitle", "SCANNER STATUS", UDim2.new(0, 10, 0, 7), UDim2.new(1, -20, 0, 16), 10, BANANA_YELLOW, Enum.Font.GothamBold)
-        eventStatusText = makeLabel(statusPanel, "StatusValue", "Waiting for scan...", UDim2.new(0, 10, 0, 27), UDim2.new(1, -20, 0, 27), 11, Color3.fromRGB(160, 190, 210), Enum.Font.GothamMedium)
-
-        local eventsPanel = makePanel("SeaEventsList", 225, 5)
-        makeLabel(eventsPanel, "EventsTitle", "DETECTED EVENTS", UDim2.new(0, 10, 0, 8), UDim2.new(1, -20, 0, 18), 11, BANANA_YELLOW, Enum.Font.GothamBold)
-        eventCountText = makeLabel(eventsPanel, "EventsCount", "Active events: 0", UDim2.new(0, 10, 0, 29), UDim2.new(1, -20, 0, 16), 10, Color3.fromRGB(180, 190, 205), Enum.Font.GothamMedium)
-        eventListText = makeLabel(eventsPanel, "EventsList", "No active Sea Events detected", UDim2.new(0, 10, 0, 50), UDim2.new(1, -20, 0, 164), 9, Color3.fromRGB(215, 220, 230), Enum.Font.Gotham)
-
-        local refreshPanel = makePanel("SeaEventsRefresh", 42, 6)
-        local refreshButton = Instance.new("TextButton")
-        refreshButton.Name = "RefreshSeaEvents"
-        refreshButton.Size = UDim2.new(1, -16, 1, -10)
-        refreshButton.Position = UDim2.new(0, 8, 0, 5)
-        refreshButton.BackgroundColor3 = Color3.fromRGB(38, 70, 88)
-        refreshButton.BorderSizePixel = 0
-        refreshButton.Text = "↻  Refresh Scanner"
-        refreshButton.TextColor3 = Color3.fromRGB(235, 245, 255)
-        refreshButton.TextSize = 11
-        refreshButton.Font = Enum.Font.GothamBold
-        refreshButton.AutoButtonColor = true
-        refreshButton.Parent = refreshPanel
-        addCorner(refreshButton, 6)
-
-        local notePanel = makePanel("SeaEventsNote", 52, 7)
-        makeLabel(notePanel, "Note", "Some events are announced by the game UI and may not expose a model to scan", UDim2.new(0, 10, 0, 8), UDim2.new(1, -20, 0, 38), 9, Color3.fromRGB(145, 152, 170), Enum.Font.Gotham)
-
-        local function normalizeName(value)
-            return string.lower(tostring(value or "")):gsub("[^%w]", "")
+        if string.find(n, "ship", 1, true) or string.find(n, "boat", 1, true)
+            or string.find(n, "raid", 1, true) or string.find(n, "ghost", 1, true)
+            or string.find(n, "haunted", 1, true) then
+            return "ShipRaid"
         end
+        return nil
+    end
 
-        local function hasToken(name, tokens)
-            local normalized = normalizeName(name)
-            for _, token in ipairs(tokens) do
-                local wanted = normalizeName(token)
-                if wanted ~= "" and string.find(normalized, wanted, 1, true) then
-                    return true
-                end
-            end
-            return false
+    local function wantType(kind)
+        if kind == "SeaBeast" then return Q.SE.beastOn end
+        if kind == "TerrorShark" then return Q.SE.terrorOn end
+        if kind == "Piranha" then return Q.SE.piranhaOn end
+        if kind == "ShipRaid" then return Q.SE.shipOn end
+        return false
+    end
+
+    local function collectSeaMobs()
+        local list = {}
+        local folders = {}
+        local enemies = workspace:FindFirstChild("Enemies")
+        if enemies then folders[#folders + 1] = enemies end
+        for _, name in ipairs({"SeaBeasts", "Sea Events", "SeaEvents", "Boats"}) do
+            local f = workspace:FindFirstChild(name)
+            if f then folders[#folders + 1] = f end
         end
-
-        local function objectPosition(object)
-            if not object or not object.Parent then return nil end
-            if object:IsA("BasePart") then return object.Position end
-            if object:IsA("Model") then
-                local root = object:FindFirstChild("HumanoidRootPart") or object.PrimaryPart
-                if root and root:IsA("BasePart") then return root.Position end
-                local okPivot, pivot = pcall(function() return object:GetPivot() end)
-                if okPivot and pivot then return pivot.Position end
-            end
-            return nil
-        end
-
-        local function isAlive(model)
-            local humanoid = model and model:FindFirstChildOfClass("Humanoid")
-            return not humanoid or humanoid.Health > 0
-        end
-
-        local function sendEventNotice(eventName, count)
-            if not seaNotifyEnabled then return end
-            if tick() - (lastNoticeAt[eventName] or 0) < 12 then return end
-            lastNoticeAt[eventName] = tick()
-            pcall(function()
-                game:GetService("StarterGui"):SetCore("SendNotification", {
-                    Title = "Minh Hub | Sea Event",
-                    Text = eventName .. (count and count > 1 and (" x" .. tostring(count)) or "") .. " detected",
-                    Duration = 5,
-                })
-            end)
-        end
-
-        local function setEventHighlight(object)
-            if not seaHighlightEnabled or not object or highlights[object] then return end
-            if not (object:IsA("Model") or object:IsA("BasePart")) then return end
-            local h = Instance.new("Highlight")
-            h.Name = "MinhHubSeaEventHighlight"
-            h.Adornee = object
-            h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-            h.FillColor = Color3.fromRGB(40, 170, 255)
-            h.OutlineColor = Color3.fromRGB(255, 210, 85)
-            h.FillTransparency = 0.82
-            h.OutlineTransparency = 0.08
-            h.Parent = workspace
-            highlights[object] = h
-        end
-
-        local function scanSeaEvents()
-            local seaNumber = World2 and 2 or (World3 and 3 or 1)
-            if seaNumber == 1 then
-                eventStatusText.Text = "Event scan only supports Sea 2 and Sea 3"
-                eventStatusText.TextColor3 = Color3.fromRGB(230, 175, 90)
-                eventCountText.Text = "Active events: 0"
-                eventListText.Text = "No active Sea Events detected"
-                return
-            end
-
-            local found = {}
-            local function addEvent(eventName, object)
-                local row = found[eventName]
-                if not row then
-                    row = {objects = {}, objectSet = {}, count = 0, nearest = math.huge}
-                    found[eventName] = row
-                end
-                if object and not row.objectSet[object] then
-                    row.objectSet[object] = true
-                    row.objects[#row.objects + 1] = object
-                    row.count = #row.objects
-                    local playerRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                    local pos = objectPosition(object)
-                    if playerRoot and pos then
-                        row.nearest = math.min(row.nearest, (playerRoot.Position - pos).Magnitude)
+        local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        local origin = root and root.Position
+        for _, folder in ipairs(folders) do
+            local ok, children = pcall(function() return folder:GetChildren() end)
+            if ok then
+                for _, m in ipairs(children) do
+                    local hrp = isAliveModel(m)
+                    if hrp then
+                        local kind = classifyMob(m.Name)
+                        if kind and wantType(kind) then
+                            local dist = origin and (hrp.Position - origin).Magnitude or 0
+                            list[#list + 1] = {model = m, hrp = hrp, kind = kind, dist = dist}
+                        end
                     end
                 end
             end
+        end
+        table.sort(list, function(a, b) return a.dist < b.dist end)
+        return list
+    end
 
-            -- Static/location events. Names follow the live Workspace objects used by the game.
-            local locationEvents = {
-                {"Mirage Island", 3, {"MysticIsland", "Mirage Island"}},
-                {"Prehistoric Island", 3, {"PrehistoricIsland", "Prehistoric Island"}},
-                {"Kitsune Island", 3, {"KitsuneIsland", "Kitsune Island"}},
-                {"Frozen Dimension", 3, {"FrozenDimension", "Frozen Dimension"}},
-                {"Haunted Shipwreck", 3, {"HauntedShipwreck", "Haunted Shipwreck"}},
-                {"Treasure Island", 2, {"TreasureIsland", "Treasure Island"}},
-                {"Rough Sea", 2, {"RoughSea", "Rough Sea"}},
-            }
-            local worldOrigin = workspace:FindFirstChild("_WorldOrigin")
-            local locations = worldOrigin and worldOrigin:FindFirstChild("Locations")
-            local map = workspace:FindFirstChild("Map")
-            local staticRoots = {}
-            if locations then staticRoots[#staticRoots + 1] = locations end
-            if map then staticRoots[#staticRoots + 1] = map end
-            staticRoots[#staticRoots + 1] = workspace
-            for _, info in ipairs(locationEvents) do
-                if seaNumber >= info[2] then
-                    for _, root in ipairs(staticRoots) do
-                        if root then
-                            for _, alias in ipairs(info[3]) do
-                                local object = root:FindFirstChild(alias)
-                                if object then addEvent(info[1], object) end
+    local ISLAND_ALIASES = {
+        {"Mirage Island", {"MysticIsland", "Mirage Island", "MirageIsland"}},
+        {"Kitsune Island", {"KitsuneIsland", "Kitsune Island"}},
+        {"Prehistoric Island", {"PrehistoricIsland", "Prehistoric Island"}},
+        {"Frozen Dimension", {"FrozenDimension", "Frozen Dimension"}},
+    }
+
+    local function findEventIsland()
+        local locs = workspace:FindFirstChild("_WorldOrigin")
+        locs = locs and locs:FindFirstChild("Locations")
+        local map = workspace:FindFirstChild("Map")
+        local parents = {locs, map, workspace}
+        for _, entry in ipairs(ISLAND_ALIASES) do
+            local label, names = entry[1], entry[2]
+            for _, par in ipairs(parents) do
+                if par then
+                    for _, nm in ipairs(names) do
+                        local o = par:FindFirstChild(nm)
+                        if o then
+                            local pos
+                            if o:IsA("BasePart") then
+                                pos = o.Position
+                            elseif o:IsA("Model") or o:IsA("Folder") then
+                                local ok, cf = pcall(function() return o:GetPivot() end)
+                                if ok and cf then pos = cf.Position end
+                                if not pos then
+                                    local p = o:FindFirstChildWhichIsA("BasePart", true)
+                                    if p then pos = p.Position end
+                                end
+                            end
+                            if pos then
+                                return label, pos, o
                             end
                         end
                     end
                 end
             end
+        end
+        return nil
+    end
 
-            -- Hostile sea encounters and ship groups are scanned only in live folders.
-            local enemies = workspace:FindFirstChild("Enemies")
-            local boats = workspace:FindFirstChild("Boats")
-            local seaBeasts = {}
-            if enemies then
-                for _, model in ipairs(enemies:GetChildren()) do
-                    if model:IsA("Model") and isAlive(model) then
-                        local name = model.Name
-                        if hasToken(name, {"terrorshark"}) then
-                            if seaNumber == 3 then addEvent("Terrorshark", model) end
-                        elseif hasToken(name, {"seabeast", "sea beast"}) then
-                            addEvent("Sea Beast", model)
-                            seaBeasts[#seaBeasts + 1] = model
-                        elseif hasToken(name, {"piranha"}) then
-                            addEvent("Piranha", model)
-                        elseif seaNumber == 3 and hasToken(name, {"ghostshark", "hauntedcrew"}) then
-                            addEvent("Haunted Shipwreck", model)
-                        elseif seaNumber == 3 and hasToken(name, {"ghostship", "hauntedship"}) then
-                            addEvent("Haunted Ship Raid", model)
-                        elseif hasToken(name, {"shark"}) then
-                            addEvent("Shark", model)
-                        elseif hasToken(name, {"grandbrigade", "brigade", "shipraid"}) then
-                            addEvent(seaNumber == 3 and "Ship Raid" or "Ship Raid", model)
-                        end
-                    end
-                end
-            end
+    local function otherBusy()
+        return _G.FruitPickupBusy == true
+            or _G.PirateRaidBusy == true
+            or _G.BuyMeleeActive == true
+            or _G.Dungeon == true
+            or autoRaidEnabled == true
+            or (_G.AutoUnlockSeaBusy == true)
+    end
 
-            if boats then
-                for _, boat in ipairs(boats:GetChildren()) do
-                    if boat:IsA("Model") then
-                        local name = boat.Name
-                        if hasToken(name, {"grandbrigade", "brigade", "shipraid"}) then
-                            addEvent("Ship Raid", boat)
-                        elseif seaNumber == 3 and hasToken(name, {"ghostship", "hauntedship"}) then
-                            addEvent("Haunted Ship Raid", boat)
-                        end
-                    end
-                end
-            end
+    local function release()
+        _G.SeaEventBusy = false
+        Q.SE.busy = false
+        if targetEnemy and typeof(targetEnemy) == "Instance" then
+            local kind = classifyMob(targetEnemy.Name)
+            if kind then targetEnemy = nil end
+        end
+    end
 
-            if seaNumber == 3 and #seaBeasts >= 3 then
-                for _, beast in ipairs(seaBeasts) do addEvent("Rumbling Waters", beast) end
-            end
-
-            local eventOrder = {
-                "Terrorshark", "Rumbling Waters", "Haunted Shipwreck", "Haunted Ship Raid",
-                "Frozen Dimension", "Prehistoric Island", "Kitsune Island", "Mirage Island",
-                "Sea Beast", "Ship Raid", "Shark", "Piranha", "Treasure Island", "Rough Sea",
-            }
-            local displayed = {}
-            local activeCount = 0
-            local currentObjects = {}
-            for _, eventName in ipairs(eventOrder) do
-                local row = found[eventName]
-                if row and row.count > 0 then
-                    activeCount += 1
-                    local distanceText = row.nearest < math.huge and (" | " .. tostring(math.floor(row.nearest)) .. " studs") or ""
-                    displayed[#displayed + 1] = string.format("• %s%s%s", eventName, row.count > 1 and (" x" .. tostring(row.count)) or "", distanceText)
-                    for object in pairs(row.objectSet) do currentObjects[object] = true end
-                end
-            end
-
-            if activeCount == 0 then
-                eventStatusText.Text = string.format("Sea %d | scanning — no matching event model", seaNumber)
-                eventStatusText.TextColor3 = Color3.fromRGB(155, 162, 180)
-                eventCountText.Text = "Active events: 0"
-                eventListText.Text = "No active Sea Events detected"
-            else
-                eventStatusText.Text = string.format("Sea %d | %d active event type(s) detected", seaNumber, activeCount)
-                eventStatusText.TextColor3 = Color3.fromRGB(115, 225, 155)
-                eventCountText.Text = "Active events: " .. tostring(activeCount)
-                eventListText.Text = table.concat(displayed, "\n")
-            end
-
-            if scanInitialized then
-                for eventName, row in pairs(found) do
-                    if row.count > 0 and not previousActive[eventName] then
-                        sendEventNotice(eventName, row.count)
-                    end
-                end
-            else
-                scanInitialized = true
-            end
-
-            previousActive = {}
-            for eventName, row in pairs(found) do
-                if row.count > 0 then previousActive[eventName] = true end
-            end
-
-            -- Clear highlights for objects that disappeared or are no longer highlighted.
-            for object, highlight in pairs(highlights) do
-                if not seaHighlightEnabled or not currentObjects[object] or not object.Parent then
-                    pcall(function() highlight:Destroy() end)
-                    highlights[object] = nil
-                end
-            end
-            if seaHighlightEnabled then
-                for object in pairs(currentObjects) do setEventHighlight(object) end
+    local function engageMob(entry)
+        if not entry or not entry.model or not entry.model.Parent then return false end
+        local hrpMob = entry.hrp
+        if not hrpMob or not hrpMob.Parent then return false end
+        Q.SE.busy = true
+        _G.SeaEventBusy = true
+        targetEnemy = entry.model
+        setStatus(string.format("⚔️ %s (%s) — %d studs", entry.kind, entry.model.Name, math.floor(entry.dist)))
+        if not fastAttackEnabled then fastAttackEnabled = true end
+        local hover = tonumber(Q.SE.hover) or 28
+        local spd = tonumber(Q.SE.speed) or 280
+        if _G.FlyStraight then
+            _G.FlyStraight(function()
+                if not entry.model or not entry.model.Parent then return nil end
+                local h = entry.model:FindFirstChild("HumanoidRootPart")
+                if not h then return nil end
+                return h.Position + Vector3.new(0, hover, 0)
+            end, spd, function()
+                return Q.SE.on and _G.SeaEventFarm and entry.model and entry.model.Parent
+                    and isAliveModel(entry.model) and not otherBusy()
+            end, 8)
+        else
+            local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if root then
+                root.CFrame = CFrame.new(hrpMob.Position + Vector3.new(0, hover, 0))
             end
         end
-        scanNow = scanSeaEvents
+        return true
+    end
 
-        refreshButton.MouseButton1Click:Connect(function()
-            if scanNow then pcall(scanNow) end
-        end)
+    local function goIsland(label, pos)
+        Q.SE.busy = true
+        _G.SeaEventBusy = true
+        setStatus("🏝 Đảo sự kiện: " .. label .. " — đang bay tới...")
+        local dest = pos + Vector3.new(0, 40, 0)
+        local spd = tonumber(Q.SE.speed) or 280
+        if _G.FlyStraight then
+            _G.FlyStraight(function() return dest end, spd, function()
+                return Q.SE.on and _G.SeaEventFarm and Q.SE.islandOn and not otherBusy()
+            end, 25)
+        else
+            local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if root then root.CFrame = CFrame.new(dest) end
+        end
+        Q.SE.lastIsland = label
+        setStatus("🏝 Đã tới " .. label .. " — khám phá / farm")
+        task.wait(2)
+    end
 
-        _G.MHSpawn(function()
-            while seaEventsPage.Parent and task.wait(2) do
-                if seaRadarEnabled then
-                    pcall(scanSeaEvents)
+    local function loop()
+        while true do
+            task.wait(0.45)
+            local ok, err = pcall(function()
+                if not Q.SE.on or not _G.SeaEventFarm then
+                    if Q.SE.busy then release() end
+                    if Q.SE.status ~= "Disabled" then setStatus("Disabled") end
+                    return
                 end
+                if not (World2 or World3) then
+                    setStatus("Sea Event chỉ có ở Sea 2 / Sea 3")
+                    release()
+                    return
+                end
+                if otherBusy() then
+                    setStatus("⏸ Đang nhường cho Raid / Fruit / Pirate Raid...")
+                    release()
+                    return
+                end
+
+                if Q.SE.islandOn then
+                    local label, pos = findEventIsland()
+                    if label and pos then
+                        local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                        local dist = root and (root.Position - pos).Magnitude or 99999
+                        if dist > 180 then
+                            goIsland(label, pos)
+                            return
+                        else
+                            setStatus("🏝 Đang ở " .. label)
+                        end
+                    end
+                end
+
+                local mobs = collectSeaMobs()
+                if #mobs > 0 then
+                    engageMob(mobs[1])
+                else
+                    if Q.SE.busy then release() end
+                    setStatus("😴 Chưa thấy Sea Event — hãy lên thuyền / ra vùng Danger để spawn")
+                end
+            end)
+            if not ok then
+                slog("lỗi:", tostring(err))
+                release()
+                task.wait(1)
             end
-            for object, highlight in pairs(highlights) do
-                pcall(function() highlight:Destroy() end)
-                highlights[object] = nil
-            end
-        end)
+        end
+    end
+
+    local seaPage = createTab("SeaEvent", "🌊", false)
+    pcall(function()
+        tabs["SeaEvent"].Button.LayoutOrder = 5
+        local btn = tabs["SeaEvent"].Button
+        local ic = btn:FindFirstChildWhichIsA("TextLabel")
+        if ic and ic.Text == "▪" then ic.Text = "🌊" end
     end)
 
-    if not okSeaUI then
-        warn("[Sea Events] Không khởi tạo được tab Sea Events:", errSeaUI)
+    local statusCard = Instance.new("Frame")
+    statusCard.Size = UDim2.new(1, 0, 0, 52)
+    statusCard.BackgroundColor3 = BANANA_CARD
+    statusCard.LayoutOrder = 0
+    statusCard.Parent = seaPage
+    addCorner(statusCard, 8)
+    addStroke(statusCard, Color3.fromRGB(70, 180, 255), 1.2)
+
+    local stTitle = Instance.new("TextLabel")
+    stTitle.Size = UDim2.new(1, -20, 0, 18)
+    stTitle.Position = UDim2.new(0, 10, 0, 4)
+    stTitle.BackgroundTransparency = 1
+    stTitle.Text = "🌊 SEA EVENT STATUS"
+    stTitle.TextColor3 = Color3.fromRGB(100, 200, 255)
+    stTitle.TextSize = 11
+    stTitle.Font = Enum.Font.GothamBold
+    stTitle.TextXAlignment = Enum.TextXAlignment.Left
+    stTitle.Parent = statusCard
+
+    local stText = Instance.new("TextLabel")
+    stText.Size = UDim2.new(1, -20, 0, 24)
+    stText.Position = UDim2.new(0, 10, 0, 24)
+    stText.BackgroundTransparency = 1
+    stText.Text = "Status: Disabled"
+    stText.TextColor3 = Color3.fromRGB(200, 205, 215)
+    stText.TextSize = 10
+    stText.Font = Enum.Font.Gotham
+    stText.TextXAlignment = Enum.TextXAlignment.Left
+    stText.TextWrapped = true
+    stText.Parent = statusCard
+
+    _G.MHSpawn(function()
+        while stText.Parent do
+            task.wait(0.4)
+            stText.Text = "Status: " .. tostring(_G.SeaEventStatus or Q.SE.status or "-")
+        end
+    end)
+
+    createToggleFeature(seaPage, "AutoSeaEventToggle", "Auto Sea Event",
+        "Tự tìm và đánh Sea Beast / Terror Shark / Piranha / Ship Raid; ưu tiên đảo Mirage-Kitsune-Prehistoric khi xuất hiện (Sea 2/3)",
+        1, false, function(state)
+            Q.SE.on = state
+            _G.SeaEventFarm = state
+            if state then
+                setStatus("Đang quét Sea Event...")
+                if not fastAttackEnabled then fastAttackEnabled = true end
+            else
+                release()
+                setStatus("Disabled")
+                stopAllFlying()
+            end
+        end)
+
+    createToggleFeature(seaPage, "SEIslandToggle", "Auto TP Event Island",
+        "Bay tới Mirage / Kitsune / Prehistoric / Frozen Dimension khi đảo xuất hiện trên server",
+        2, true, function(state) Q.SE.islandOn = state end)
+
+    createToggleFeature(seaPage, "SEBeastToggle", "Farm Sea Beast",
+        "Tấn công Sea Beast / Rumbling Waters",
+        3, true, function(state) Q.SE.beastOn = state end)
+
+    createToggleFeature(seaPage, "SETerrorToggle", "Farm Terror Shark",
+        "Tấn công Terrorshark (Sea 3)",
+        4, true, function(state) Q.SE.terrorOn = state end)
+
+    createToggleFeature(seaPage, "SEPiranhaToggle", "Farm Piranha",
+        "Tấn công đàn Piranha",
+        5, true, function(state) Q.SE.piranhaOn = state end)
+
+    createToggleFeature(seaPage, "SEShipToggle", "Farm Ship Raid",
+        "Tấn công thuyền / thủy thủ Ship Raid & Haunted Ship",
+        6, true, function(state) Q.SE.shipOn = state end)
+
+    local note = Instance.new("TextLabel")
+    note.Size = UDim2.new(1, -4, 0, 56)
+    note.BackgroundTransparency = 1
+    note.LayoutOrder = 10
+    note.TextWrapped = true
+    note.TextColor3 = Color3.fromRGB(150, 155, 170)
+    note.TextSize = 10
+    note.Font = Enum.Font.Gotham
+    note.TextXAlignment = Enum.TextXAlignment.Left
+    note.TextYAlignment = Enum.TextYAlignment.Top
+    note.Text = "Gợi ý: lên thuyền rồi ra vùng Sea Danger (Sea 3) để event spawn nhiều hơn. Dùng fruit/race đi được trên nước (Ice/Magma/Shark...) để an toàn. Module này bay + đánh quái đã xuất hiện; không tự mua thuyền."
+    note.Parent = seaPage
+
+    local oldMode = Q.FS and Q.FS.mode
+    if Q.FS and type(oldMode) == "function" then
+        Q.FS.mode = function()
+            if _G.SeaEventBusy or (Q.SE and Q.SE.on and _G.SeaEventFarm) then
+                return "🌊 Sea Event: " .. tostring(_G.SeaEventStatus or Q.SE.status), Color3.fromRGB(80, 190, 255)
+            end
+            return oldMode()
+        end
     end
-end
+
+    _G.MHSpawn(loop)
+
+    _G.AutoSeaEvent = function(on)
+        if toggleUpdateFuncs["AutoSeaEventToggle"] then
+            pcall(toggleUpdateFuncs["AutoSeaEventToggle"], on ~= false)
+        end
+        Q.SE.on = (on ~= false)
+        _G.SeaEventFarm = Q.SE.on
+    end
+
+    slog("Sea Event module loaded")
+    end)
+    if not okSE then
+        warn("[SeaEvent] Lỗi khởi tạo:", errSE)
+    end
+end)
 
 -- MENU SAFETY: đảm bảo ScreenGui không bị tắt/ẩn sau khi thêm module Shop.
 task.defer(function()
