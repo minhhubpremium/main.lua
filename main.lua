@@ -39,7 +39,7 @@ do
                 fails = fails + 1
                 warn("[Minh Hub] Luồng bị lỗi (" .. fails .. "/5): " .. tostring(err))
                 if fails >= 5 then return end
-                realWait(2)
+                realWait(math.min(2 ^ (fails - 1), 8))  -- chờ 1s, 2s, 4s, 8s: lỗi thoáng qua phục hồi nhanh, lỗi dai không spam
             end
         end)
     end
@@ -51,579 +51,8 @@ local UserInputService     = game:GetService("UserInputService")
 local ReplicatedStorage    = game:GetService("ReplicatedStorage")
 
 
--- =========================================================
--- MÀN HÌNH LOADING: hiển thị tiến trình tải script (thanh % + bước đang tải + thời gian)
---  * _G.MinhHubLoad(phần_trăm, "nội dung")  : cập nhật tiến trình
---  * _G.MinhHubLoadDone()                   : báo tải xong -> hiện 100% rồi mờ dần và đóng
---  * Tự đóng sau 40 giây nếu script bị lỗi giữa chừng (tránh kẹt màn hình)
--- =========================================================
+-- Cờ báo script đã chạy xong (cơ chế chống chạy trùng ở đầu file dùng cờ này).
 _G.MinhHubReady = false
-_G.MinhHubGreeted = false
-_G.MinhHubLoad, _G.MinhHubLoadDone = nil, nil
-do
-    local okL = pcall(function()
-        local Real = game:GetService("TweenService")
-        local lp = Players.LocalPlayer
-        local parent
-        local okH, hui = pcall(function() return gethui and gethui() end)
-        if okH and hui then parent = hui end
-        if not parent then
-            local okC, cg = pcall(function() return game:GetService("CoreGui") end)
-            if okC and cg then parent = cg end
-        end
-        if not parent and lp then parent = lp:FindFirstChildOfClass("PlayerGui") or lp:WaitForChild("PlayerGui", 10) end
-        if not parent then return end
-
-        pcall(function()
-            local old = parent:FindFirstChild("MinhHubLoading")
-            if old then old:Destroy() end
-        end)
-
-        -- Cùng bảng màu & kiểu dáng với menu chính; chữ to, tương phản cao cho dễ đọc
-        local ACCENT  = Color3.fromRGB(64, 140, 255)
-        local ACCENT_L = Color3.fromRGB(120, 180, 255)
-        local BG      = Color3.fromRGB(22, 24, 30)
-        local SIDEBAR = Color3.fromRGB(14, 15, 19)
-        local CARD    = Color3.fromRGB(44, 46, 54)
-        local BORDER  = Color3.fromRGB(72, 76, 88)
-        local MUTED   = Color3.fromRGB(150, 155, 172)
-        local WHITE   = Color3.fromRGB(240, 242, 250)
-
-        local gui = Instance.new("ScreenGui")
-        gui.Name = "MinhHubLoading"
-        gui.ResetOnSpawn = false
-        gui.IgnoreGuiInset = true
-        gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-        gui.DisplayOrder = 1000000
-        pcall(function() if syn and syn.protect_gui then syn.protect_gui(gui) end end)
-        gui.Parent = parent
-
-        local function corner(o, r) local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, r) c.Parent = o return c end
-        local function gradient(o, c0, c1, rot)
-            local g = Instance.new("UIGradient")
-            g.Color = ColorSequence.new(c0, c1)
-            g.Rotation = rot or 0
-            g.Parent = o
-            return g
-        end
-
-        -- ===== LOADING GỌN NHỎ (kiểu công nghệ) + THÔNG BÁO SCRIPT TRƯỢT VÀO GÓC PHẢI =====
-        local CY = Color3.fromRGB(70, 210, 255)
-        local MUT = Color3.fromRGB(110, 135, 158)
-        local MONO = Enum.Font.Code
-        local CW, CH = 380, 222
-        local CEN, RIGHT = Enum.TextXAlignment.Center, Enum.TextXAlignment.Right
-
-        -- nền chỉ phủ nhẹ để vẫn thấy game phía sau
-        local dim = Instance.new("Frame")
-        dim.Size = UDim2.new(1, 0, 1, 0)
-        dim.BackgroundColor3 = Color3.fromRGB(2, 5, 10)
-        dim.BackgroundTransparency = 0.6
-        dim.BorderSizePixel = 0
-        dim.Parent = gui
-
-        local blur
-        pcall(function()
-            blur = Instance.new("BlurEffect")
-            blur.Name = "MinhHubLoadingBlur"
-            blur.Size = 0
-            blur.Parent = game:GetService("Lighting")
-            Real:Create(blur, TweenInfo.new(0.6), {Size = 7}):Play()
-        end)
-
-        local function rect(parentObj, x, y, w, h, color, tr)
-            local f = Instance.new("Frame")
-            f.Size = UDim2.new(0, w, 0, h)
-            f.Position = UDim2.new(0, x, 0, y)
-            f.BackgroundColor3 = color
-            f.BackgroundTransparency = tr or 0
-            f.BorderSizePixel = 0
-            f.Parent = parentObj
-            return f
-        end
-        local function label(parentObj, txt, size, font, color, pos, sz, align)
-            local l = Instance.new("TextLabel")
-            l.BackgroundTransparency = 1
-            l.Text = txt
-            l.TextSize = size
-            l.Font = font
-            l.TextColor3 = color
-            l.Position = pos
-            l.Size = sz
-            l.TextXAlignment = align or Enum.TextXAlignment.Left
-            l.Parent = parentObj
-            return l
-        end
-
-        -- quầng sáng mềm
-        local glowLayers = {}
-        for i = 1, 4 do
-            local gl = Instance.new("Frame")
-            gl.AnchorPoint = Vector2.new(0.5, 0.5)
-            gl.Position = UDim2.new(0.5, 0, 0.5, 0)
-            gl.Size = UDim2.new(0, CW + i * 14, 0, CH + i * 14)
-            gl.BackgroundColor3 = CY
-            gl.BackgroundTransparency = 0.93 + i * 0.016
-            gl.BorderSizePixel = 0
-            gl.Parent = gui
-            corner(gl, 6 + i * 5)
-            glowLayers[i] = gl
-        end
-
-        local card = Instance.new("Frame")
-        card.Size = UDim2.new(0, CW, 0, CH)
-        card.AnchorPoint = Vector2.new(0.5, 0.5)
-        card.Position = UDim2.new(0.5, 0, 0.5, 0)
-        card.BackgroundColor3 = Color3.fromRGB(7, 12, 21)
-        card.BackgroundTransparency = 0.05
-        card.BorderSizePixel = 0
-        card.ClipsDescendants = true
-        card.Parent = gui
-        corner(card, 8)
-        local stroke = Instance.new("UIStroke")
-        stroke.Color = Color3.new(1, 1, 1)
-        stroke.Thickness = 1.3
-        stroke.Parent = card
-        local strokeGrad = gradient(stroke, CY, Color3.fromRGB(24, 44, 70), 45)
-        local cardScale = Instance.new("UIScale")
-        cardScale.Scale = 0.9
-        cardScale.Parent = card
-
-        -- lưới mờ + tia quét
-        for gx = 0, CW, 24 do rect(card, gx, 0, 1, CH, CY, 0.96) end
-        for gy = 0, CH, 24 do rect(card, 0, gy, CW, 1, CY, 0.96) end
-        local scan = rect(card, 0, -40, CW, 40, CY, 0)
-        do
-            local g = Instance.new("UIGradient")
-            g.Rotation = 90
-            g.Transparency = NumberSequence.new({
-                NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.88, 0.93), NumberSequenceKeypoint.new(1, 0.72)})
-            g.Parent = scan
-        end
-
-        -- thanh trên cùng
-        local dot = rect(card, 14, 11, 6, 6, CY, 0)
-        corner(dot, 3)
-        label(card, "MINH_HUB // LOADING", 10, MONO, CY, UDim2.new(0, 26, 0, 6), UDim2.new(0, 200, 0, 16))
-        local timeL = label(card, "T+0.0s", 10, MONO, MUT, UDim2.new(1, -90, 0, 6), UDim2.new(0, 76, 0, 16), RIGHT)
-        rect(card, 12, 26, CW - 24, 1, CY, 0.78)
-
-        -- lõi nhỏ: 2 vòng xoay + chấm quay quanh chữ M
-        local RX, RY = 62, 86
-        local halos = {}
-        for i = 1, 3 do
-            local h = Instance.new("Frame")
-            h.AnchorPoint = Vector2.new(0.5, 0.5)
-            h.Position = UDim2.new(0, RX, 0, RY)
-            h.Size = UDim2.new(0, 60 + i * 20, 0, 60 + i * 20)
-            h.BackgroundColor3 = CY
-            h.BackgroundTransparency = 0.93 + i * 0.012
-            h.BorderSizePixel = 0
-            h.Parent = card
-            corner(h, 30 + i * 10)
-            halos[i] = h
-        end
-        local rings, ringSpeed = {}, {160, -260}
-        for i, r in ipairs({86, 64}) do
-            local rf = Instance.new("Frame")
-            rf.AnchorPoint = Vector2.new(0.5, 0.5)
-            rf.Position = UDim2.new(0, RX, 0, RY)
-            rf.Size = UDim2.new(0, r, 0, r)
-            rf.BackgroundTransparency = 1
-            rf.Parent = card
-            corner(rf, math.floor(r / 2))
-            local rs = Instance.new("UIStroke")
-            rs.Color = Color3.new(1, 1, 1)
-            rs.Thickness = 2
-            rs.Parent = rf
-            local g = Instance.new("UIGradient")
-            g.Color = ColorSequence.new(i == 2 and Color3.fromRGB(0, 140, 255) or CY)
-            g.Transparency = NumberSequence.new({
-                NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.28, 1),
-                NumberSequenceKeypoint.new(0.32, 0.05), NumberSequenceKeypoint.new(0.66, 0.05),
-                NumberSequenceKeypoint.new(0.7, 1), NumberSequenceKeypoint.new(1, 1)})
-            g.Parent = rs
-            rings[i] = g
-        end
-        local orbits = {}
-        for i = 1, 3 do
-            local o = Instance.new("Frame")
-            o.AnchorPoint = Vector2.new(0.5, 0.5)
-            o.Size = UDim2.new(0, 5, 0, 5)
-            o.BackgroundColor3 = i == 2 and Color3.new(1, 1, 1) or CY
-            o.BorderSizePixel = 0
-            o.Parent = card
-            corner(o, 3)
-            orbits[i] = {f = o, r = 43, a = i * 2.09, sp = 1.4}
-        end
-        local core = Instance.new("Frame")
-        core.AnchorPoint = Vector2.new(0.5, 0.5)
-        core.Position = UDim2.new(0, RX, 0, RY)
-        core.Size = UDim2.new(0, 40, 0, 40)
-        core.BackgroundColor3 = Color3.fromRGB(8, 16, 30)
-        core.BorderSizePixel = 0
-        core.Parent = card
-        corner(core, 20)
-        local coreStroke = Instance.new("UIStroke")
-        coreStroke.Color = CY
-        coreStroke.Thickness = 1.6
-        coreStroke.Parent = core
-        local logoM = label(core, "M", 20, Enum.Font.GothamBlack, Color3.new(1, 1, 1), UDim2.new(0, 0, 0, 0), UDim2.new(1, 0, 1, 0), CEN)
-        gradient(logoM, Color3.new(1, 1, 1), CY, 90)
-
-        -- tiêu đề hiện từng chữ + gợn sáng
-        local TITLE = "MINH HUB"
-        local letters = {}
-        do
-            local x = 118
-            for i = 1, #TITLE do
-                local ch = TITLE:sub(i, i)
-                local wch = ch == " " and 10 or 23
-                if ch ~= " " then
-                    local l = label(card, ch, 28, Enum.Font.GothamBlack, Color3.new(1, 1, 1),
-                        UDim2.new(0, x, 0, 56), UDim2.new(0, wch, 0, 34), CEN)
-                    l.TextTransparency = 1
-                    letters[#letters + 1] = l
-                    local idx = #letters
-                    task.delay(0.25 + idx * 0.06, function()
-                        pcall(function()
-                            Real:Create(l, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                                {TextTransparency = 0, Position = UDim2.new(0, l.Position.X.Offset, 0, 46)}):Play()
-                        end)
-                    end)
-                end
-                x = x + wch
-            end
-        end
-        label(card, "PREMIUM SCRIPT · BLOX FRUITS", 10, MONO, CY, UDim2.new(0, 118, 0, 84), UDim2.new(0, 250, 0, 14))
-        local dispName = "bạn"
-        pcall(function() dispName = lp.DisplayName ~= "" and lp.DisplayName or lp.Name end)
-        local welcomeL = label(card, "Xin chào, " .. dispName .. "! Đang chuẩn bị script...", 11, Enum.Font.Gotham, Color3.fromRGB(150, 175, 198),
-            UDim2.new(0, 118, 0, 100), UDim2.new(0, 250, 0, 16))
-        welcomeL.TextTruncate = Enum.TextTruncate.AtEnd
-
-        -- dòng việc đang làm + phần trăm
-        local step = label(card, "Starting...", 11, MONO, Color3.fromRGB(235, 245, 255), UDim2.new(0, 16, 0, 140), UDim2.new(1, -100, 0, 18))
-        step.TextTruncate = Enum.TextTruncate.AtEnd
-        local pctL = label(card, "0%", 20, Enum.Font.GothamBlack, Color3.new(1, 1, 1),
-            UDim2.new(1, -86, 0, 134), UDim2.new(0, 70, 0, 26), RIGHT)
-        gradient(pctL, Color3.new(1, 1, 1), CY, 90)
-
-        local track = rect(card, 16, 164, CW - 32, 5, Color3.fromRGB(10, 18, 30), 0)
-        corner(track, 3)
-        local fill = Instance.new("Frame")
-        fill.Size = UDim2.new(0, 0, 1, 0)
-        fill.BackgroundColor3 = Color3.new(1, 1, 1)
-        fill.BorderSizePixel = 0
-        fill.ClipsDescendants = true
-        fill.Parent = track
-        corner(fill, 3)
-        gradient(fill, Color3.fromRGB(0, 120, 230), CY, 0)
-        local shimmer = Instance.new("Frame")
-        shimmer.Size = UDim2.new(0, 40, 1, 0)
-        shimmer.Position = UDim2.new(0, -40, 0, 0)
-        shimmer.BackgroundColor3 = Color3.new(1, 1, 1)
-        shimmer.BorderSizePixel = 0
-        shimmer.Parent = fill
-        do
-            local sg2 = Instance.new("UIGradient")
-            sg2.Transparency = NumberSequence.new({
-                NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.5, 0.35), NumberSequenceKeypoint.new(1, 1)})
-            sg2.Parent = shimmer
-        end
-        local tip = Instance.new("Frame")
-        tip.AnchorPoint = Vector2.new(0.5, 0.5)
-        tip.Size = UDim2.new(0, 11, 0, 11)
-        tip.Position = UDim2.new(0, 0, 0.5, 0)
-        tip.BackgroundColor3 = Color3.new(1, 1, 1)
-        tip.BorderSizePixel = 0
-        tip.ZIndex = 3
-        tip.Parent = track
-        corner(tip, 6)
-        do
-            local tsk = Instance.new("UIStroke")
-            tsk.Color = CY
-            tsk.Thickness = 2.5
-            tsk.Transparency = 0.4
-            tsk.Parent = tip
-        end
-
-        local stages = {{"HỆ THỐNG", 20}, {"DỮ LIỆU", 45}, {"GIAO DIỆN", 75}, {"HOÀN TẤT", 100}}
-        local chips = {}
-        local colW = (CW - 32) / 4
-        for i, st in ipairs(stages) do
-            local chip = Instance.new("Frame")
-            chip.BackgroundTransparency = 1
-            chip.Position = UDim2.new(0, 16 + (i - 1) * colW, 0, 178)
-            chip.Size = UDim2.new(0, colW, 0, 16)
-            chip.Parent = card
-            local cd = rect(chip, 0, 5, 5, 5, MUT, 0)
-            corner(cd, 3)
-            local cl = label(chip, st[1], 10, MONO, MUT, UDim2.new(0, 10, 0, 0), UDim2.new(1, -10, 1, 0))
-            chips[i] = {chip = chip, dot = cd, lbl = cl, at = st[2], on = false}
-        end
-
-        local hintL = label(card, "Menu sẽ tự mở khi tải xong", 10, Enum.Font.Gotham, Color3.fromRGB(130, 155, 178),
-            UDim2.new(0, 12, 1, -22), UDim2.new(1, -24, 0, 16), CEN)
-        local TIPS = {
-            "💡 Menu sẽ tự mở khi tải xong",
-            "💡 Dùng Auto Farm Chest khi rảnh để gom Beli và rương",
-            "💡 Nhấn nút Minh Hub để ẩn/hiện menu bất cứ lúc nào",
-        }
-
-        -- ===== THÔNG BÁO SCRIPT: mỗi bước tải xong trượt vào góc phải dưới =====
-        local toastHolder = Instance.new("Frame")
-        toastHolder.AnchorPoint = Vector2.new(1, 1)
-        toastHolder.Position = UDim2.new(1, -16, 1, -16)
-        toastHolder.Size = UDim2.new(0, 290, 0, 200)
-        toastHolder.BackgroundTransparency = 1
-        toastHolder.Parent = gui
-        do
-            local ll = Instance.new("UIListLayout")
-            ll.SortOrder = Enum.SortOrder.LayoutOrder
-            ll.VerticalAlignment = Enum.VerticalAlignment.Bottom
-            ll.Padding = UDim.new(0, 6)
-            ll.Parent = toastHolder
-        end
-        local toastN = 0
-        local function pushToast(text, isDone)
-            pcall(function()
-                toastN = toastN + 1
-                local kids = {}
-                for _, c in ipairs(toastHolder:GetChildren()) do
-                    if c:IsA("Frame") then kids[#kids + 1] = c end
-                end
-                while #kids >= 4 do local old = table.remove(kids, 1) old:Destroy() end
-                local wrap = Instance.new("Frame")
-                wrap.Size = UDim2.new(1, 0, 0, 36)
-                wrap.BackgroundTransparency = 1
-                wrap.ClipsDescendants = false
-                wrap.LayoutOrder = toastN
-                wrap.Parent = toastHolder
-                local f = Instance.new("Frame")
-                f.Size = UDim2.new(1, 0, 1, 0)
-                f.Position = UDim2.new(1, 320, 0, 0)
-                f.BackgroundColor3 = Color3.fromRGB(8, 15, 27)
-                f.BackgroundTransparency = 0.05
-                f.BorderSizePixel = 0
-                f.Parent = wrap
-                corner(f, 5)
-                local fs = Instance.new("UIStroke")
-                fs.Color = isDone and Color3.fromRGB(110, 255, 190) or CY
-                fs.Thickness = 1
-                fs.Transparency = 0.2
-                fs.Parent = f
-                local bar = rect(f, 0, 0, 3, 36, isDone and Color3.fromRGB(110, 255, 190) or CY, 0)
-                label(f, isDone and "✔ SCRIPT READY" or "◆ SCRIPT", 9, MONO,
-                    isDone and Color3.fromRGB(110, 255, 190) or CY, UDim2.new(0, 12, 0, 3), UDim2.new(1, -20, 0, 12))
-                local msg = label(f, tostring(text), 11, MONO, Color3.fromRGB(225, 238, 250),
-                    UDim2.new(0, 12, 0, 16), UDim2.new(1, -20, 0, 16))
-                msg.TextTruncate = Enum.TextTruncate.AtEnd
-                Real:Create(f, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Position = UDim2.new(0, 0, 0, 0)}):Play()
-                task.delay(2.4, function()
-                    pcall(function()
-                        Real:Create(f, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {Position = UDim2.new(1, 320, 0, 0)}):Play()
-                        task.delay(0.35, function() pcall(function() wrap:Destroy() end) end)
-                    end)
-                end)
-            end)
-        end
-        local lastStep = "Starting..."
-        step:GetPropertyChangedSignal("Text"):Connect(function()
-            if step.Text == lastStep then return end
-            lastStep = step.Text
-            pushToast(step.Text, step.Text == "Hoàn tất!")
-        end)
-
-        local t0 = os.clock()
-        local target, shown, closed = 0, 0, false
-
-        pcall(function()
-            Real:Create(cardScale, TweenInfo.new(0.45, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Scale = 1}):Play()
-        end)
-
-        local conn
-        conn = game:GetService("RunService").Heartbeat:Connect(function(dt)
-            if closed then return end
-            local t = os.clock() - t0
-            shown = shown + (target - shown) * math.min(1, dt * 2.5)
-            if target - shown < 0.3 then shown = target end
-            local frac = math.clamp(shown / 100, 0, 1)
-            fill.Size = UDim2.new(frac, 0, 1, 0)
-            tip.Position = UDim2.new(frac, 0, 0.5, 0)
-            pctL.Text = string.format("%d%%", math.floor(shown + 0.5))
-            timeL.Text = string.format("T+%.1fs", t)
-            if not _G.MinhHubGreeted then hintL.Text = TIPS[(math.floor(t / 2.4) % #TIPS) + 1] end
-            shimmer.Position = UDim2.new(0, -40 + ((t % 1.2) / 1.2) * (fill.AbsoluteSize.X + 40), 0, 0)
-            strokeGrad.Rotation = 45 + (t * 60) % 360
-            dot.BackgroundTransparency = 0.5 - 0.5 * math.sin(t * 6)
-            scan.Position = UDim2.new(0, 0, 0, -40 + ((t % 2.6) / 2.6) * (CH + 40))
-            for i, g in ipairs(rings) do g.Rotation = (t * ringSpeed[i]) % 360 end
-            for i, h in ipairs(halos) do
-                h.BackgroundTransparency = 0.93 + i * 0.012 + 0.015 * math.sin(t * 2.6 - i * 0.6)
-            end
-            for gi, gl in ipairs(glowLayers) do
-                gl.BackgroundTransparency = 0.93 + gi * 0.016 + 0.012 * math.sin(t * 2)
-            end
-            for _, o in ipairs(orbits) do
-                local a = o.a + t * o.sp
-                o.f.Position = UDim2.new(0, RX + math.cos(a) * o.r, 0, RY + math.sin(a) * o.r)
-            end
-            coreStroke.Thickness = 1.6 + 0.8 * (0.5 + 0.5 * math.sin(t * 4))
-            for i, l in ipairs(letters) do
-                local k = 0.5 + 0.5 * math.sin(t * 3 - i * 0.55)
-                l.TextColor3 = Color3.new(1, 1, 1):Lerp(CY, k * 0.75)
-            end
-            for _, c in ipairs(chips) do
-                local on = shown >= c.at - 0.5
-                if on ~= c.on then
-                    c.on = on
-                    local ti = TweenInfo.new(0.25)
-                    Real:Create(c.dot, ti, {BackgroundColor3 = on and CY or MUT}):Play()
-                    Real:Create(c.lbl, ti, {TextColor3 = on and Color3.new(1, 1, 1) or MUT}):Play()
-                end
-            end
-        end)
-
-        -- Thông báo chào mừng (tự vẽ, không dùng thông báo mặc định của Roblox) trượt vào góc phải dưới
-        local function showWelcomeToast()
-            pcall(function()
-                local tg = Instance.new("ScreenGui")
-                tg.Name = "MinhHubWelcome"
-                tg.ResetOnSpawn = false
-                tg.IgnoreGuiInset = true
-                tg.DisplayOrder = 1000001
-                tg.Parent = parent
-                local W, H = 330, 84
-                local f = Instance.new("Frame")
-                f.AnchorPoint = Vector2.new(1, 1)
-                f.Size = UDim2.new(0, W, 0, H)
-                f.Position = UDim2.new(1, W + 40, 1, -28)   -- bắt đầu ngoài màn hình bên phải
-                f.BackgroundColor3 = Color3.new(1, 1, 1)
-                f.BorderSizePixel = 0
-                f.ClipsDescendants = true
-                f.Parent = tg
-                corner(f, 6)
-                gradient(f, Color3.fromRGB(12, 22, 38), Color3.fromRGB(5, 8, 14), 60)
-                local fs = Instance.new("UIStroke")
-                fs.Color = Color3.new(1, 1, 1)
-                fs.Thickness = 1.6
-                fs.Parent = f
-                gradient(fs, Color3.fromRGB(70, 210, 255), Color3.fromRGB(24, 44, 70), 60)
-
-                -- vạch màu bên trái
-                local bar = Instance.new("Frame")
-                bar.Size = UDim2.new(0, 4, 1, 0)
-                bar.BackgroundColor3 = Color3.new(1, 1, 1)
-                bar.BorderSizePixel = 0
-                bar.Parent = f
-                gradient(bar, Color3.fromRGB(70, 210, 255), Color3.fromRGB(0, 120, 220), 90)
-
-                -- logo tròn
-                local lg = Instance.new("Frame")
-                lg.Position = UDim2.new(0, 18, 0.5, -24)
-                lg.Size = UDim2.new(0, 48, 0, 48)
-                lg.BackgroundColor3 = SIDEBAR
-                lg.BorderSizePixel = 0
-                lg.Parent = f
-                corner(lg, 24)
-                local lgs = Instance.new("UIStroke")
-                lgs.Color = Color3.fromRGB(70, 210, 255)
-                lgs.Thickness = 2
-                lgs.Parent = lg
-                label(lg, "M", 24, Enum.Font.GothamBlack, ACCENT_L, UDim2.new(0, 0, 0, 0), UDim2.new(1, 0, 1, 0), Enum.TextXAlignment.Center)
-
-                label(f, "SYSTEM ONLINE ✓", 11, Enum.Font.Code, Color3.fromRGB(70, 210, 255),
-                    UDim2.new(0, 80, 0, 10), UDim2.new(1, -92, 0, 16))
-                label(f, "Chúc anh em chơi vui vẻ!", 15, Enum.Font.GothamBold, Color3.new(1, 1, 1),
-                    UDim2.new(0, 80, 0, 27), UDim2.new(1, -92, 0, 22))
-                local sub = label(f, "> Minh Hub sẵn sàng • " .. dispName, 11, Enum.Font.Code, Color3.fromRGB(110, 150, 180),
-                    UDim2.new(0, 80, 0, 52), UDim2.new(1, -92, 0, 18))
-                sub.TextTruncate = Enum.TextTruncate.AtEnd
-
-                -- thanh đếm ngược ở đáy
-                local cd = Instance.new("Frame")
-                cd.AnchorPoint = Vector2.new(0, 1)
-                cd.Position = UDim2.new(0, 0, 1, 0)
-                cd.Size = UDim2.new(1, 0, 0, 3)
-                cd.BackgroundColor3 = Color3.new(1, 1, 1)
-                cd.BorderSizePixel = 0
-                cd.Parent = f
-                gradient(cd, Color3.fromRGB(0, 120, 220), Color3.fromRGB(70, 210, 255), 0)
-
-                Real:Create(f, TweenInfo.new(0.55, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
-                    {Position = UDim2.new(1, -24, 1, -28)}):Play()
-                Real:Create(cd, TweenInfo.new(5, Enum.EasingStyle.Linear), {Size = UDim2.new(0, 0, 0, 3)}):Play()
-                task.delay(5.2, function()
-                    pcall(function()
-                        Real:Create(f, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-                            {Position = UDim2.new(1, W + 40, 1, -28)}):Play()
-                        task.delay(0.6, function() pcall(function() tg:Destroy() end) end)
-                    end)
-                end)
-            end)
-        end
-
-        local function close()
-            if closed then return end
-            closed = true
-            showWelcomeToast()
-            _G.MinhHubReady = true
-            pcall(function() if _G.MinhHubMenuGui then _G.MinhHubMenuGui.Enabled = true end end)  -- hiện menu khi loading đóng
-            pcall(function() if conn then conn:Disconnect() end end)
-            pcall(function()
-                if blur then
-                    Real:Create(blur, TweenInfo.new(0.5), {Size = 0}):Play()
-                    task.delay(0.6, function() pcall(function() blur:Destroy() end) end)
-                end
-            end)
-            pcall(function()
-                local ti = TweenInfo.new(0.5)
-                Real:Create(cardScale, ti, {Scale = 0.94}):Play()
-                for _, d in ipairs(gui:GetDescendants()) do
-                    if d:IsA("TextLabel") then Real:Create(d, ti, {TextTransparency = 1}):Play()
-                    elseif d:IsA("Frame") then Real:Create(d, ti, {BackgroundTransparency = 1}):Play()
-                    elseif d:IsA("UIStroke") then Real:Create(d, ti, {Transparency = 1}):Play() end
-                end
-            end)
-            task.delay(0.6, function() pcall(function() gui:Destroy() end) end)
-        end
-
-        -- Tải từ từ: mỗi mốc tạm dừng LOAD_STEP_DELAY giây (chỉnh số này để nhanh/chậm hơn, 0 = không chờ)
-        local LOAD_STEP_DELAY = 0.45
-        _G.MinhHubLoad = function(pct, text)
-            if closed then return end
-            if type(pct) == "number" and pct > target then target = math.min(pct, 100) end
-            if text then step.Text = tostring(text) end
-            if LOAD_STEP_DELAY > 0 then task.wait(LOAD_STEP_DELAY) end
-        end
-        _G.MinhHubLoadDone = function()
-            if closed then return end
-            target = 100
-            _G.MinhHubGreeted = true
-            step.Text = "Hoàn tất!"
-            step.TextColor3 = ACCENT_L
-            hintL.Text = "🎉 Chúc anh em chơi vui vẻ!"
-            hintL.TextColor3 = Color3.new(1, 1, 1)
-            hintL.Font = Enum.Font.GothamBold
-            hintL.TextSize = 14
-            welcomeL.Text = "Tải xong, mở menu..."
-            task.delay(1.6, close)
-        end
-
-        -- phòng khi script lỗi giữa chừng: tự đóng, không kẹt màn hình
-        task.delay(40, close)
-    end)
-    if not okL or not _G.MinhHubLoadDone then
-        -- không tạo được màn hình loading: bỏ qua loading, vẫn hiện menu bình thường
-        _G.MinhHubLoad = function() end
-        _G.MinhHubLoadDone = function()
-            _G.MinhHubReady = true
-            pcall(function() if _G.MinhHubMenuGui then _G.MinhHubMenuGui.Enabled = true end end)
-        end
-    end
-end
-_G.MinhHubLoad(5, "Loading stable flight system...")
 -- =========================================================
 -- BỘ BAY ỔN ĐỊNH (thay thế Tween CFrame của HumanoidRootPart)
 -- Mọi chỗ gọi TweenService:Create(HumanoidRootPart, ..., {CFrame = ...}) giờ đều đi qua bộ bay này:
@@ -770,7 +199,6 @@ local okVIM, VirtualInputManager = pcall(function() return game:GetService("Virt
 local okVU, VirtualUser          = pcall(function() return game:GetService("VirtualUser") end)
 
 local LocalPlayer = Players.LocalPlayer
-_G.MinhHubLoad(10, "Loading player information...")
 if not LocalPlayer then
     Players:GetPropertyChangedSignal("LocalPlayer"):Wait()
     LocalPlayer = Players.LocalPlayer
@@ -1141,7 +569,6 @@ local raidChipsList = {
     "Spider", "Magma", "Buddha", "Sand", "Dough", "Phoenix"
 }
 
-_G.MinhHubLoad(18, "Loading Auto Quest data...")
 -- =========================================================--
 --              HỆ THỐNG DỮ LIỆU AUTO QUEST                 --
 -- =========================================================--
@@ -1482,6 +909,39 @@ Q.flyingToExit = false
 -- Điểm thoát dùng riêng cho Auto Pickup Fruit: đang ở Underwater City mà trái rơi ở ngoài -> bay tới đây trước.
 Q.UNDERWATER_FRUIT_EXIT = Vector3.new(61171.62, -3.95, 1953.09)
 
+-- Đang ở trong Underwater City (đảo dưới nước Sea 1)? Thành phố nằm ở X > 50000.
+function Q.inUnderwaterCity(hrp)
+    return World1 == true and hrp ~= nil and hrp.Position.X > 50000
+end
+
+-- Chạm các part xoáy nước / cổng / portal quanh điểm thoát để được dịch chuyển ra ngoài.
+-- Danh sách part được quét tối đa 15 giây một lần (trước đây quét lại toàn bộ Map mỗi 1-2 giây).
+Q._exitPartsCache = nil
+function Q.touchUnderwaterExit(hrp, ex)
+    if typeof(firetouchinterest) ~= "function" then return end
+    local c = Q._exitPartsCache
+    if not c or tick() - c.at > 15 or (c.ex - ex).Magnitude > 1 then
+        local list = {}
+        local map = workspace:FindFirstChild("Map")
+        if map then
+            for _, d in ipairs(map:GetDescendants()) do
+                if d:IsA("BasePart") and (d.Position - ex).Magnitude <= 80 then
+                    local n = string.lower(d.Name)
+                    if string.find(n, "whirlpool", 1, true) or string.find(n, "portal", 1, true) or string.find(n, "exit", 1, true)
+                        or string.find(n, "gate", 1, true) or string.find(n, "teleport", 1, true) then
+                        list[#list + 1] = d
+                    end
+                end
+            end
+        end
+        c = {at = tick(), ex = ex, list = list}
+        Q._exitPartsCache = c
+    end
+    for _, d in ipairs(c.list) do
+        if d.Parent then pcall(function() firetouchinterest(hrp, d, 0); firetouchinterest(hrp, d, 1) end) end
+    end
+end
+
 -- Trả về true nếu còn đang bay tới / chờ dịch chuyển ở điểm thoát (vòng farm nên chờ), false khi xong/bỏ cuộc.
 function Q.flyToUnderwaterExit(hrp)
     local ex = Q.UNDERWATER_EXIT
@@ -1513,25 +973,36 @@ function Q.flyToUnderwaterExit(hrp)
     hrp.AssemblyLinearVelocity = Vector3.zero
 
     -- chạm thử các part cổng / xoáy / portal gần điểm thoát để được dịch chuyển ra ngoài
-    if typeof(firetouchinterest) == "function" and tick() - Q.exitNearAt >= Q.PORTAL_WAIT and tick() - (Q.exitTouchAt or 0) > 2 then
+    if tick() - Q.exitNearAt >= Q.PORTAL_WAIT and tick() - (Q.exitTouchAt or 0) > 2 then
         Q.exitTouchAt = tick()
-        local map = workspace:FindFirstChild("Map")
-        if map then
-            for _, d in ipairs(map:GetDescendants()) do
-                if d:IsA("BasePart") and (d.Position - ex).Magnitude <= 80 then
-                    local n = string.lower(d.Name)
-                    if string.find(n, "whirlpool", 1, true) or string.find(n, "portal", 1, true) or string.find(n, "exit", 1, true)
-                        or string.find(n, "gate", 1, true) or string.find(n, "teleport", 1, true) then
-                        pcall(function() firetouchinterest(hrp, d, 0); firetouchinterest(hrp, d, 1) end)
-                    end
-                end
-            end
-        end
+        Q.touchUnderwaterExit(hrp, ex)
     end
 
     -- chờ dịch chuyển tối đa 25 giây; quá thời gian thì thôi để farm không bị kẹt mãi ở đây
     if tick() - Q.exitNearAt > Q.PORTAL_WAIT + 25 then
         Q.qlog("Sea 1: đứng ở điểm thoát 25s mà chưa ra ngoài -> bỏ qua")
+        return false
+    end
+    return true
+end
+
+-- Thoát Underwater City qua xoáy nước cho MỌI chức năng Sea 1 (farm level/boss, chest, Saber, nhặt trái, mua võ).
+-- Trả về true nếu còn đang xử lý (người gọi nên chờ), false khi đã ở ngoài hoặc tạm bỏ cuộc.
+-- Thử lại tối đa 3 lượt; vẫn kẹt thì nghỉ 30 giây rồi mới thử lại.
+function Q.leaveUnderwaterCity(hrp)
+    if not Q.inUnderwaterCity(hrp) then
+        Q.exitTries, Q.exitGiveUpAt = 0, nil
+        return false
+    end
+    if Q.exitGiveUpAt and tick() < Q.exitGiveUpAt then return false end
+    Q.exitGiveUpAt = nil
+    if Q.flyToUnderwaterExit(hrp) then return true end
+    Q.exitTries = (Q.exitTries or 0) + 1
+    Q.exitNearAt = nil
+    if Q.exitTries >= 3 then
+        Q.exitTries = 0
+        Q.exitGiveUpAt = tick() + 30
+        Q.qlog("Sea 1: 3 lượt thoát Underwater City đều thất bại -> nghỉ 30s rồi thử lại")
         return false
     end
     return true
@@ -2990,7 +2461,8 @@ function Q.enterIfNeeded(hrp, pos, sourceKey, targetName)
     end
     -- Đang ở Underwater City mà mục tiêu kế tiếp nằm bên ngoài (farm level xong ở đây) -> bay tới điểm thoát
     if not entrance and World1 and pos.X < 50000 and hrp.Position.X > 50000 then
-        if Q.flyToUnderwaterExit(hrp) then return true end
+        Q.leaveUnderwaterCity(hrp)
+        return true   -- chưa ra khỏi thành phố thì chờ lượt sau; không để người gọi tween ~57000 studs qua hư không
     end
     if not entrance then return false end
     if tick() - (Q.lastEntrance or 0) < 6 then return false end
@@ -3505,14 +2977,13 @@ pcall(function()
     end
 end)
 
-_G.MinhHubLoad(28, "Creating the menu interface...")
 -- TẠO UI GIAO DIỆN MENU
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "MinhHubBloxFruits"
 screenGui.ResetOnSpawn = false
 screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 screenGui.DisplayOrder = 999999
-screenGui.Enabled = false  -- ẩn menu cho tới khi load script xong
+screenGui.Enabled = false  -- ẩn menu cho tới khi dựng xong giao diện (bật ở cuối file)
 _G.MinhHubMenuGui = screenGui
 
 pcall(function()
@@ -3558,9 +3029,8 @@ mainFrame.Visible = true
 mainFrame.Parent = screenGui
 
 -- MENU FAILSAFE: nếu một module farm phía dưới gặp lỗi runtime, không để
--- ScreenGui bị Enabled=false vô thời hạn. Khi script hoàn tất, MinhHubLoadDone
--- vẫn điều khiển hiệu ứng loading như cũ; đây chỉ là dự phòng.
-task.delay(25, function()
+-- ScreenGui bị Enabled=false vô thời hạn (bình thường menu được bật ở cuối file).
+task.delay(15, function()
     pcall(function()
         if screenGui and screenGui.Parent then
             screenGui.Enabled = true
@@ -3799,7 +3269,7 @@ local function createTab(tabName, iconText, isDefault)
 
     -- biểu tượng đơn sắc bên trái tên tab
     do
-        local iconMap = {Farm = "⚔", Boss = "♛", Raid = "☄", Gacha = "✦", Shop = "⛁", Config = "⚙", ESP = "◉", Status = "▤"}
+        local iconMap = {Farm = "⚔", Boss = "♛", Raid = "☄", Gacha = "✦", Shop = "⛁", Config = "⚙", ESP = "◉", Status = "▤", ["Sea Events"] = "🌊"}
         local ic = Instance.new("TextLabel")
         ic.Size = UDim2.new(0, 22, 1, 0)
         ic.Position = UDim2.new(0, -26, 0, 0)
@@ -3913,6 +3383,18 @@ do
         {"Redeem Code", "Đổi Code"},
         {"Server Stats", "Thống kê máy chủ"},
         {"Server Events", "Sự kiện máy chủ"},
+        {"Sea Events", "Sự kiện biển"},
+        {"Event Radar", "Radar sự kiện biển"},
+        {"Scan live Sea Events in Sea 2 and Sea 3", "Quét sự kiện biển đang xuất hiện ở Sea 2 và Sea 3"},
+        {"Event Notifications", "Thông báo sự kiện"},
+        {"Notify when a new Sea Event is detected", "Thông báo khi phát hiện sự kiện biển mới"},
+        {"Highlight Event Objects", "Tô sáng đối tượng sự kiện"},
+        {"Highlight detected event models and islands", "Tạo viền sáng cho mô hình quái và đảo sự kiện đã phát hiện"},
+        {"Refresh Scanner", "Quét lại ngay"},
+        {"Waiting for scan...", "Đang chờ quét..."},
+        {"No active Sea Events detected", "Chưa phát hiện sự kiện biển nào đang hoạt động"},
+        {"Event scan only supports Sea 2 and Sea 3", "Trình quét chỉ hỗ trợ Sea 2 và Sea 3"},
+        {"Some events are announced by the game UI and may not expose a model to scan", "Một số sự kiện chỉ thông báo trên giao diện game nên có thể không có mô hình để quét"},
         {"Local Stats", "Thống kê nhân vật"},
         {"Server Time", "Thời gian máy chủ"},
         {"Players", "Người chơi"},
@@ -4023,15 +3505,7 @@ do
 
     -- Các cặp bên dưới được thay trong câu dài (theo thứ tự dài nhất trước).
     local phrasePairs = {
-        {"Blox Fruits • Đang tải script...", "Blox Fruits • Loading script..."},
         {"Vũ khí: ", "Weapon: "},
-        {"Đang tải bộ bay ổn định...", "Loading stable flight system..."},
-        {"Đang tải thông tin người chơi...", "Loading player information..."},
-        {"Đang tải dữ liệu Auto Quest...", "Loading Auto Quest data..."},
-        {"Đang tải Redeem Code...", "Loading Redeem Code..."},
-        {"Đang tạo giao diện menu...", "Creating the menu interface..."},
-        {"Đang tải tab ESP...", "Loading the ESP tab..."},
-        {"Đang tải tab Status...", "Loading the Status tab..."},
         {"Tự động farm mục tiêu đã chọn", "Automatically farm the selected target"},
         {"Tự động nhận nhiệm vụ chuẩn theo cấp độ (Gồm cả Đảo Xương)", "Automatically accept level-appropriate quests (including Haunted Castle)"},
         {"Bay đến và diệt quái rớt nguyên liệu chọn", "Fly to and defeat mobs that drop the selected material"},
@@ -4270,18 +3744,6 @@ do
         watchTextObject(obj)
     end
     screenGui.DescendantAdded:Connect(watchTextObject)
-
-    -- Đồng bộ cả màn hình loading nếu nó vẫn đang hiển thị.
-    local loadingGui
-    pcall(function()
-        loadingGui = screenGui.Parent and screenGui.Parent:FindFirstChild("MinhHubLoading")
-    end)
-    if loadingGui then
-        for _, obj in ipairs(loadingGui:GetDescendants()) do
-            watchTextObject(obj)
-        end
-        loadingGui.DescendantAdded:Connect(watchTextObject)
-    end
 
     local languageCard = Instance.new("Frame")
     languageCard.Name = "LanguageSelectorCard"
@@ -5519,7 +4981,6 @@ end
 
 -- Đã bỏ thanh Farm Height khỏi tab Raid theo yêu cầu.
 
-_G.MinhHubLoad(38, "Loading Auto Raid...")
 -- =========================================================
 --   RAID: AUTO BUY CHIP / AUTO START RAID / AUTO FARM RAID
 --   Hỗ trợ Sea 2 + Sea 3 (BẢN FIX)
@@ -8282,7 +7743,6 @@ createInputFeature(settingsPage, "Underwater City Gate Wait (s)", Q.PORTAL_WAIT,
     Q.PORTAL_WAIT = math.clamp(tonumber(val) or 6, 1, 30)
 end)
 
-_G.MinhHubLoad(46, "Loading Redeem Code...")
 -- =========================================================
 --                      REDEEM CODE
 -- =========================================================
@@ -9770,6 +9230,7 @@ _G.MHSpawn(function()
     local failCount     = setmetatable({}, {__mode = "k"})
     local currentTarget = nil
     local collectedCnt  = 0
+    local noneSince     = nil   -- mốc bắt đầu không còn rương nào (dùng để thoát Underwater City khi hết rương)
     _G.ChestStatus = "Idle"
 
     local function chestUsable(chest)
@@ -9858,9 +9319,23 @@ _G.MHSpawn(function()
                     end
                     currentTarget = bestChest
                     if not bestChest then
+                        -- Hết rương ở Underwater City (Sea 1): bay ra qua xoáy nước NGAY để tìm rương bên ngoài,
+                        -- thay vì đứng chờ trong thành phố. Phải liên tục 2s không thấy rương mới thoát
+                        -- (tránh trường hợp rương chưa kịp tải sau khi vừa dịch chuyển xuống).
+                        if Q.inUnderwaterCity(hrp) then
+                            noneSince = noneSince or tick()
+                            if tick() - noneSince >= 2 then
+                                _G.ChestStatus = "Hết rương ở đảo dưới nước — đang bay ra ngoài"
+                                Q.leaveUnderwaterCity(hrp)
+                                return
+                            end
+                        else
+                            noneSince = nil
+                        end
                         _G.ChestStatus = "No chest available"
                         return
                     end
+                    noneSince = nil
                     _G.ChestStatus = ("Chest: %d collected, %d left"):format(collectedCnt, #cands)
 
                     -- Thùng rương ở Thuyền Ma (hoặc ở ngoài thuyền) dùng cùng bộ điều phối cổng.
@@ -9986,21 +9461,9 @@ _G.MHSpawn(function()
                     root.CFrame = CFrame.new(ex)
                     root.AssemblyLinearVelocity  = Vector3.zero
                     root.AssemblyAngularVelocity = Vector3.zero
-                    if typeof(firetouchinterest) == "function" and tick() - lastTouch > 1 and tick() - t0 >= Q.PORTAL_WAIT then
+                    if tick() - lastTouch > 1 and tick() - t0 >= Q.PORTAL_WAIT then
                         lastTouch = tick()
-                        local map = workspace:FindFirstChild("Map")
-                        if map then
-                            for _, d in ipairs(map:GetDescendants()) do
-                                if d:IsA("BasePart") and (d.Position - ex).Magnitude <= 80 then
-                                    local n = string.lower(d.Name)
-                                    if string.find(n, "whirlpool", 1, true) or string.find(n, "portal", 1, true)
-                                        or string.find(n, "exit", 1, true) or string.find(n, "gate", 1, true)
-                                        or string.find(n, "teleport", 1, true) then
-                                        pcall(function() firetouchinterest(root, d, 0); firetouchinterest(root, d, 1) end)
-                                    end
-                                end
-                            end
-                        end
+                        Q.touchUnderwaterExit(root, ex)
                     end
                     RunService.Heartbeat:Wait()
                 end
@@ -10135,7 +9598,6 @@ _G.MHSpawn(function()
 end)
 
 
-_G.MinhHubLoad(54, "Đang tải tab ESP...")
 -- =========================================================
 --   TAB ESP: PLAYER / TRÁI ÁC QUỶ / ĐẢO (SEA 1-2-3) / BERRY
 -- =========================================================
@@ -11015,6 +10477,14 @@ do
             end
             return true
         end
+
+        -- Sea 1: đang ở Underwater City mà quái/điểm farm nằm ngoài -> bay ra qua xoáy nước trước.
+        -- Lỗi cũ: không có chiều này nên vòng farm tween thẳng ~57000 studs qua hư không (bay "từ từ" cả phút mà không tới).
+        -- Chưa ra được thì GIỮ NGUYÊN (return true), tuyệt đối không bay xuyên hư không.
+        if MatFarm.sea == 1 and targetPos.X < 50000 and hrp.Position.X > 50000 then
+            Q.leaveUnderwaterCity(hrp)
+            return true
+        end
         return false
     end
 end
@@ -11210,7 +10680,6 @@ local function isMobBoss(mobName)
     return false
 end
 
-_G.MinhHubLoad(62, "Loading Mob Bring feature...")
 -- =========================================================--
 --            TÍNH NĂNG GOM QUÁI MƯỢT MÀ                    --
 -- =========================================================--
@@ -11856,7 +11325,6 @@ _G.MHSpawn(function()
     end
 end)
 
-_G.MinhHubLoad(68, "Loading Auto Elite Hunter...")
 -- =========================================================--
 --      AUTO ELITE HUNTER (Sea 3) + THẺ TRẠNG THÁI SERVER     --
 -- =========================================================--
@@ -12312,7 +11780,6 @@ end
 
 -- Đã bỏ vòng lặp cập nhật trạng thái riêng của TAB Boss.
 
-_G.MinhHubLoad(74, "Loading Auto Boss / Tyrant...")
 -- =========================================================--
 --   AUTO FARM + TRIỆU HỒI TYRANT OF THE SKIES (Sea 3, Tiki Outpost)
 -- =========================================================--
@@ -13775,7 +13242,6 @@ _G.MHSpawn(function()
 end) 
 
 
-_G.MinhHubLoad(86, "Loading Auto Dough King...")
 -- =========================================================
 -- AUTO DOUGH KING (Sea 3)
 --  Quy trình (theo Blox Fruits Wiki):
@@ -13923,21 +13389,34 @@ end
 
 function Q.DK.norm(n) return (string.lower(tostring(n)):gsub("[^%a]", "")) end
 
-function Q.DK.findNpc(frag)
+Q.DK._npcCache = {}
+-- `fresh` = true: bỏ qua cache "không thấy" (dùng khi vừa bay tới nơi để NPC kịp tải).
+function Q.DK.findNpc(frag, fresh)
+    local cache = Q.DK._npcCache[frag]
+    local now = tick()
+    if cache then
+        if cache.npc and cache.npc.Parent then return cache.npc end
+        if not cache.npc and not fresh and now - cache.at < 1.5 then return nil end
+    end
     local enemies = workspace:FindFirstChild("Enemies")
     local function ok(m)
-        return m:IsA("Model") and not Players:GetPlayerFromCharacter(m)
+        return m:IsA("Model")
             and string.find(Q.DK.norm(m.Name), frag, 1, true)
+            and not Players:GetPlayerFromCharacter(m)
             and not (enemies and m:IsDescendantOf(enemies))
     end
+    local found
     local npcs = workspace:FindFirstChild("NPCs")
     if npcs then
-        for _, m in ipairs(npcs:GetChildren()) do if ok(m) then return m end end
+        for _, m in ipairs(npcs:GetChildren()) do if ok(m) then found = m break end end
     end
-    for _, m in ipairs(workspace:GetDescendants()) do
-        if ok(m) then return m end
+    if not found then
+        for _, m in ipairs(workspace:GetDescendants()) do
+            if ok(m) then found = m break end
+        end
     end
-    return nil
+    Q.DK._npcCache[frag] = {npc = found, at = now}
+    return found
 end
 
 -- Tắt mọi chế độ farm khác + cập nhật ô tick trên menu
@@ -14045,7 +13524,7 @@ function Q.DK.craftSweetChalice()
             end)
         end
         task.wait(1)
-        npc = Q.DK.findNpc("sweetcrafter")
+        npc = Q.DK.findNpc("sweetcrafter", true)
     end
     if npc then
         Q.DK.talk(npc, {"yes", "accept", "trade", "craft", "exchange", "okay", "ok"}, function()
@@ -14075,7 +13554,7 @@ function Q.DK.summon()
             end)
         end
         task.wait(1)
-        npc = Q.DK.findNpc("dripmama")
+        npc = Q.DK.findNpc("dripmama", true)
     end
     if npc then
         Q.DK.talk(npc, {"yes", "accept", "summon", "start", "okay", "ok"}, function()
@@ -14344,6 +13823,21 @@ function Q.SB.findAll(patterns, scope)
     return out
 end
 
+-- Quét `root` tối đa 1 lần mỗi `ttl` giây rồi dùng lại danh sách (thay vì GetDescendants toàn map ở mọi bước lặp).
+-- `accept(d)` trả true cho đối tượng cần giữ; người gọi nên kiểm tra d.Parent trước khi dùng.
+Q.SB._nearCache = {}
+function Q.SB.nearby(key, root, ttl, accept)
+    local c = Q.SB._nearCache[key]
+    local now = tick()
+    if c and now - c.at < ttl then return c.list end
+    local list = {}
+    for _, d in ipairs(root:GetDescendants()) do
+        if accept(d) then list[#list + 1] = d end
+    end
+    Q.SB._nearCache[key] = {at = now, list = list}
+    return list
+end
+
 function Q.SB.posOf(o)
     if o:IsA("BasePart") then return o.Position end
     local ok, cf = pcall(function() return o:GetPivot() end)
@@ -14472,13 +13966,17 @@ function Q.SB.doTorch()
 
     -- Đã tới điểm nhặt đuốc: đứng yên, kích hoạt mọi đối tượng "torch" trong 15 stud
     Q.SB.torchAt = Q.SB.torchAt or tick()
-    for _, d in ipairs(workspace:GetDescendants()) do
+    local torchList = Q.SB.nearby("torch", workspace, 3, function(d)
         if (d:IsA("BasePart") or d:IsA("Model")) and string.find(string.lower(d.Name), "torch", 1, true)
             and not (LocalPlayer.Character and d:IsDescendantOf(LocalPlayer.Character))
             and not d:IsDescendantOf(LocalPlayer) then
             local pos = Q.SB.posOf(d)
-            if pos and (pos - TORCH).Magnitude <= 15 then Q.SB.activate(d) end
+            return pos ~= nil and (pos - TORCH).Magnitude <= 15
         end
+        return false
+    end)
+    for _, d in ipairs(torchList) do
+        if d.Parent then Q.SB.activate(d) end
     end
     if Q.SB.every("torchLog", 20) then
         Q.SB.log("đang đứng ở điểm nhặt đuốc; có tool torch =", tostring(Q.SB.hasTool("torch") ~= nil))
@@ -14617,8 +14115,11 @@ function Q.SB.doBurn()
     -- Liệt kê các Part quanh cửa (bán kính 20 stud) để chạm bằng đuốc + ghi log tên để chỉnh sau.
     local near, names, seen = {}, {}, {}
     local mapF = workspace:FindFirstChild("Map") or workspace
-    for _, d in ipairs(mapF:GetDescendants()) do
-        if d:IsA("BasePart") and (d.Position - DOOR).Magnitude <= 20 then
+    local nearList = Q.SB.nearby("burnNear", mapF, 3, function(d)
+        return d:IsA("BasePart") and (d.Position - DOOR).Magnitude <= 20
+    end)
+    for _, d in ipairs(nearList) do
+        if d.Parent then
             near[#near + 1] = d
             local key = d.Name .. "/" .. tostring(d.Parent and d.Parent.Name)
             if not seen[key] and #names < 15 then seen[key] = true; names[#names + 1] = key end
@@ -14792,19 +14293,23 @@ function Q.SB.doRelic()
     -- Kích hoạt mọi prompt/click/part có tên liên quan trong 20 stud quanh cửa
     local handle = relic and (relic:FindFirstChild("Handle") or relic:FindFirstChildWhichIsA("BasePart"))
     local root2 = Q.SB.root()
-    for _, d in ipairs(workspace:GetDescendants()) do
+    local relicList = Q.SB.nearby("relicDoor", workspace, 3, function(d)
         local isP = d:IsA("ProximityPrompt") or d:IsA("ClickDetector")
         if isP or d:IsA("BasePart") then
             local par = isP and d.Parent or d
             local pos = par and par:IsA("BasePart") and par.Position
-            if pos and (pos - DOOR).Magnitude <= 20 and not (LocalPlayer.Character and d:IsDescendantOf(LocalPlayer.Character)) then
-                if d:IsA("ProximityPrompt") and typeof(fireproximityprompt) == "function" then
-                    pcall(function() d.HoldDuration = 0; fireproximityprompt(d) end)
-                elseif d:IsA("ClickDetector") and typeof(fireclickdetector) == "function" then
-                    pcall(function() fireclickdetector(d) end)
-                elseif d:IsA("BasePart") and handle and typeof(firetouchinterest) == "function" then
-                    pcall(function() firetouchinterest(handle, d, 0); firetouchinterest(handle, d, 1) end)
-                end
+            return pos and (pos - DOOR).Magnitude <= 20 and not (LocalPlayer.Character and d:IsDescendantOf(LocalPlayer.Character)) or false
+        end
+        return false
+    end)
+    for _, d in ipairs(relicList) do
+        if d.Parent then
+            if d:IsA("ProximityPrompt") and typeof(fireproximityprompt) == "function" then
+                pcall(function() d.HoldDuration = 0; fireproximityprompt(d) end)
+            elseif d:IsA("ClickDetector") and typeof(fireclickdetector) == "function" then
+                pcall(function() fireclickdetector(d) end)
+            elseif d:IsA("BasePart") and handle and typeof(firetouchinterest) == "function" then
+                pcall(function() firetouchinterest(handle, d, 0); firetouchinterest(handle, d, 1) end)
             end
         end
     end
@@ -14827,6 +14332,22 @@ function Q.SB.step()
     pcall(function() lv = LocalPlayer.Data.Level.Value end)
     if lv > 0 and lv < 200 then Q.SB.setStatus("Cần Lv 200+ (hiện Lv " .. lv .. ")") return end
     if Q.SB.hasSaber() then Q.SB.finish("Đã có Saber ✅") return end
+
+    -- Mọi bước Saber đều ở bên ngoài: đang ở đảo dưới nước thì bay ra qua xoáy nước trước.
+    do
+        local r0 = Q.SB.root()
+        if r0 and Q.inUnderwaterCity(r0) then
+            Q.SB.setStatus("Đang ở đảo dưới nước — bay ra qua xoáy nước...")
+            local t0 = tick()
+            while Q.SB.on and tick() - t0 < 120 do
+                local r = Q.SB.root()
+                if not r or not Q.inUnderwaterCity(r) then break end
+                if not Q.leaveUnderwaterCity(r) then break end
+                task.wait(0.25)
+            end
+            return
+        end
+    end
 
     local p = Q.SB.progress()
     local stage
@@ -15100,7 +14621,6 @@ _G.MHSpawn(function()
     end
 end)
 
-_G.MinhHubLoad(90, "Loading Auto Start...")
 -- =========================================================
 -- AUTO START: tự xuống đảo dưới nước (Sea 3) rồi farm level
 -- Đặt Q.AUTO_SUBMERGED_FARM = false nếu không muốn tự chạy khi load script.
@@ -15138,7 +14658,6 @@ _G.MHSpawn(function()
 end)
 
 
-_G.MinhHubLoad(94, "Loading 3D interface...")
 -- =========================================================
 -- GIAO DIỆN REDZ 3D
 --  * Bóng đổ nhiều lớp dưới cửa sổ (đồng bộ vị trí/kích thước khi kéo, thu nhỏ, mở/đóng)
@@ -15524,7 +15043,6 @@ do
     if not okSk then warn("[Skills] Lỗi tạo tab Skills:", errSk) end
 end
 
-_G.MinhHubLoad(97, "Loading Status tab...")
 -- =========================================================
 --   TAB STATUS: QUÉT THÔNG TIN SERVER (thời gian, người chơi, ping/FPS,
 --   sự kiện đảo, boss, trái trên đất, tiến độ Elite / Cake Prince)
@@ -16014,7 +15532,6 @@ end
 
 -- Đã gỡ toàn bộ TAB Server Hop theo yêu cầu.
 
-_G.MinhHubLoad(99, "Loading Shop...")
 -- =========================================================
 -- SHOP: MUA FIGHTING STYLE (MELEE) + BAY TỚI NPC
 -- Tích hợp vào menu Shop hiện tại; chỉ chạy một kiểu võ tại một thời điểm.
@@ -16208,6 +15725,29 @@ _G.MHSpawn(function()
         _G.MeleeInstantTravel = false
 
         local ok, err = pcall(function()
+            -- Sea 1: các võ khác đều bán ở ngoài; đang ở đảo dưới nước thì bay ra qua xoáy nước trước.
+            if sea == 1 and entry.style ~= "FishmanKarate" then
+                local r0 = getRoot()
+                if r0 and Q.inUnderwaterCity(r0) then
+                    setStatus("Sea 1 — đang ở đảo dưới nước, bay ra qua xoáy nước trước...")
+                    local exitDeadline = os.clock() + 90
+                    while os.clock() < exitDeadline do
+                        if not (Q.MeleeShop.running and Q.MeleeShop.token == token and _G.BuyMeleeActive == true) then
+                            failureMessage = "Fighting-style purchase canceled."
+                            return
+                        end
+                        local r = getRoot()
+                        if not r or not Q.inUnderwaterCity(r) then break end
+                        if not Q.leaveUnderwaterCity(r) then break end
+                        task.wait(0.25)
+                    end
+                    local r1 = getRoot()
+                    if r1 and Q.inUnderwaterCity(r1) then
+                        error("Chưa ra khỏi đảo dưới nước được; thử lại khi nhân vật đứng ổn định.")
+                    end
+                end
+            end
+
             -- Fishman Karate ở Sea 1 nằm trong Underwater City.
             -- Không bay thẳng tới tọa độ X > 50000 từ ngoài biển: phải qua whirlpool/requestEntrance trước.
             if entry.style == "FishmanKarate" and sea == 1 then
@@ -16481,8 +16021,361 @@ _G.MHSpawn(function()
 end)
 
 
+-- =========================================================
+--   SEA EVENTS RADAR: SEA 2 + SEA 3
+--   Chỉ đọc các đối tượng đang được client tải trong Workspace.
+--   Không gọi remote, không tự dịch chuyển và không can thiệp vòng lặp farm.
+-- =========================================================
+do
+    local okSeaUI, errSeaUI = pcall(function()
+        local seaEventsPage = createTab("Sea Events", "🌊", false)
+        if tabs["Sea Events"] then
+            tabs["Sea Events"].Button.LayoutOrder = 10
+        end
 
+        local seaRadarEnabled = true
+        local seaNotifyEnabled = true
+        local seaHighlightEnabled = false
+        local scanInitialized = false
+        local previousActive = {}
+        local lastNoticeAt = {}
+        local highlights = {}
+        local eventStatusText
+        local eventListText
+        local eventCountText
+        local scanNow
 
+        local function makePanel(name, height, order)
+            local panel = Instance.new("Frame")
+            panel.Name = name
+            panel.Size = UDim2.new(1, -4, 0, height)
+            panel.BackgroundColor3 = BANANA_CARD
+            panel.BackgroundTransparency = 0.22
+            panel.BorderSizePixel = 0
+            panel.LayoutOrder = order
+            panel.Parent = seaEventsPage
+            addCorner(panel, 8)
+            addStroke(panel, BANANA_CARD_BORDER, 1)
+            return panel
+        end
+
+        local function makeLabel(parent, name, text, pos, size, textSize, color, font)
+            local label = Instance.new("TextLabel")
+            label.Name = name
+            label.Position = pos
+            label.Size = size
+            label.BackgroundTransparency = 1
+            label.Text = text
+            label.TextColor3 = color or Color3.fromRGB(225, 228, 238)
+            label.TextSize = textSize or 11
+            label.Font = font or Enum.Font.Gotham
+            label.TextXAlignment = Enum.TextXAlignment.Left
+            label.TextYAlignment = Enum.TextYAlignment.Top
+            label.TextWrapped = true
+            label.Parent = parent
+            return label
+        end
+
+        local topPanel = makePanel("SeaEventsHeader", 72, 0)
+        makeLabel(topPanel, "Header", "🌊 SEA EVENTS RADAR", UDim2.new(0, 12, 0, 8), UDim2.new(1, -24, 0, 22), 14, BANANA_YELLOW, Enum.Font.GothamBlack)
+        makeLabel(topPanel, "HeaderHint", "Live scanner for Sea 2 and Sea 3", UDim2.new(0, 12, 0, 34), UDim2.new(1, -24, 0, 20), 10, Color3.fromRGB(155, 162, 180), Enum.Font.Gotham)
+
+        createToggleFeature(seaEventsPage, "SeaEventRadarToggle", "Event Radar", "Scan live Sea Events in Sea 2 and Sea 3", 1, true, function(state)
+            seaRadarEnabled = state
+            if not state then
+                eventStatusText.Text = "Radar paused. Turn it on to scan again."
+                eventStatusText.TextColor3 = Color3.fromRGB(155, 162, 180)
+                for object, highlight in pairs(highlights) do
+                    pcall(function() highlight:Destroy() end)
+                    highlights[object] = nil
+                end
+            end
+        end)
+
+        createToggleFeature(seaEventsPage, "SeaEventNotifyToggle", "Event Notifications", "Notify when a new Sea Event is detected", 2, true, function(state)
+            seaNotifyEnabled = state
+        end)
+
+        createToggleFeature(seaEventsPage, "SeaEventHighlightToggle", "Highlight Event Objects", "Highlight detected event models and islands", 3, false, function(state)
+            seaHighlightEnabled = state
+            if not state then
+                for object, highlight in pairs(highlights) do
+                    pcall(function() highlight:Destroy() end)
+                    highlights[object] = nil
+                end
+            end
+        end)
+
+        local statusPanel = makePanel("SeaEventsStatus", 64, 4)
+        makeLabel(statusPanel, "StatusTitle", "SCANNER STATUS", UDim2.new(0, 10, 0, 7), UDim2.new(1, -20, 0, 16), 10, BANANA_YELLOW, Enum.Font.GothamBold)
+        eventStatusText = makeLabel(statusPanel, "StatusValue", "Waiting for scan...", UDim2.new(0, 10, 0, 27), UDim2.new(1, -20, 0, 27), 11, Color3.fromRGB(160, 190, 210), Enum.Font.GothamMedium)
+
+        local eventsPanel = makePanel("SeaEventsList", 225, 5)
+        makeLabel(eventsPanel, "EventsTitle", "DETECTED EVENTS", UDim2.new(0, 10, 0, 8), UDim2.new(1, -20, 0, 18), 11, BANANA_YELLOW, Enum.Font.GothamBold)
+        eventCountText = makeLabel(eventsPanel, "EventsCount", "Active events: 0", UDim2.new(0, 10, 0, 29), UDim2.new(1, -20, 0, 16), 10, Color3.fromRGB(180, 190, 205), Enum.Font.GothamMedium)
+        eventListText = makeLabel(eventsPanel, "EventsList", "No active Sea Events detected", UDim2.new(0, 10, 0, 50), UDim2.new(1, -20, 0, 164), 9, Color3.fromRGB(215, 220, 230), Enum.Font.Gotham)
+
+        local refreshPanel = makePanel("SeaEventsRefresh", 42, 6)
+        local refreshButton = Instance.new("TextButton")
+        refreshButton.Name = "RefreshSeaEvents"
+        refreshButton.Size = UDim2.new(1, -16, 1, -10)
+        refreshButton.Position = UDim2.new(0, 8, 0, 5)
+        refreshButton.BackgroundColor3 = Color3.fromRGB(38, 70, 88)
+        refreshButton.BorderSizePixel = 0
+        refreshButton.Text = "↻  Refresh Scanner"
+        refreshButton.TextColor3 = Color3.fromRGB(235, 245, 255)
+        refreshButton.TextSize = 11
+        refreshButton.Font = Enum.Font.GothamBold
+        refreshButton.AutoButtonColor = true
+        refreshButton.Parent = refreshPanel
+        addCorner(refreshButton, 6)
+
+        local notePanel = makePanel("SeaEventsNote", 52, 7)
+        makeLabel(notePanel, "Note", "Some events are announced by the game UI and may not expose a model to scan", UDim2.new(0, 10, 0, 8), UDim2.new(1, -20, 0, 38), 9, Color3.fromRGB(145, 152, 170), Enum.Font.Gotham)
+
+        local function normalizeName(value)
+            return string.lower(tostring(value or "")):gsub("[^%w]", "")
+        end
+
+        local function hasToken(name, tokens)
+            local normalized = normalizeName(name)
+            for _, token in ipairs(tokens) do
+                local wanted = normalizeName(token)
+                if wanted ~= "" and string.find(normalized, wanted, 1, true) then
+                    return true
+                end
+            end
+            return false
+        end
+
+        local function objectPosition(object)
+            if not object or not object.Parent then return nil end
+            if object:IsA("BasePart") then return object.Position end
+            if object:IsA("Model") then
+                local root = object:FindFirstChild("HumanoidRootPart") or object.PrimaryPart
+                if root and root:IsA("BasePart") then return root.Position end
+                local okPivot, pivot = pcall(function() return object:GetPivot() end)
+                if okPivot and pivot then return pivot.Position end
+            end
+            return nil
+        end
+
+        local function isAlive(model)
+            local humanoid = model and model:FindFirstChildOfClass("Humanoid")
+            return not humanoid or humanoid.Health > 0
+        end
+
+        local function sendEventNotice(eventName, count)
+            if not seaNotifyEnabled then return end
+            if tick() - (lastNoticeAt[eventName] or 0) < 12 then return end
+            lastNoticeAt[eventName] = tick()
+            pcall(function()
+                game:GetService("StarterGui"):SetCore("SendNotification", {
+                    Title = "Minh Hub | Sea Event",
+                    Text = eventName .. (count and count > 1 and (" x" .. tostring(count)) or "") .. " detected",
+                    Duration = 5,
+                })
+            end)
+        end
+
+        local function setEventHighlight(object)
+            if not seaHighlightEnabled or not object or highlights[object] then return end
+            if not (object:IsA("Model") or object:IsA("BasePart")) then return end
+            local h = Instance.new("Highlight")
+            h.Name = "MinhHubSeaEventHighlight"
+            h.Adornee = object
+            h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+            h.FillColor = Color3.fromRGB(40, 170, 255)
+            h.OutlineColor = Color3.fromRGB(255, 210, 85)
+            h.FillTransparency = 0.82
+            h.OutlineTransparency = 0.08
+            h.Parent = workspace
+            highlights[object] = h
+        end
+
+        local function scanSeaEvents()
+            local seaNumber = World2 and 2 or (World3 and 3 or 1)
+            if seaNumber == 1 then
+                eventStatusText.Text = "Event scan only supports Sea 2 and Sea 3"
+                eventStatusText.TextColor3 = Color3.fromRGB(230, 175, 90)
+                eventCountText.Text = "Active events: 0"
+                eventListText.Text = "No active Sea Events detected"
+                return
+            end
+
+            local found = {}
+            local function addEvent(eventName, object)
+                local row = found[eventName]
+                if not row then
+                    row = {objects = {}, objectSet = {}, count = 0, nearest = math.huge}
+                    found[eventName] = row
+                end
+                if object and not row.objectSet[object] then
+                    row.objectSet[object] = true
+                    row.objects[#row.objects + 1] = object
+                    row.count = #row.objects
+                    local playerRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                    local pos = objectPosition(object)
+                    if playerRoot and pos then
+                        row.nearest = math.min(row.nearest, (playerRoot.Position - pos).Magnitude)
+                    end
+                end
+            end
+
+            -- Static/location events. Names follow the live Workspace objects used by the game.
+            local locationEvents = {
+                {"Mirage Island", 3, {"MysticIsland", "Mirage Island"}},
+                {"Prehistoric Island", 3, {"PrehistoricIsland", "Prehistoric Island"}},
+                {"Kitsune Island", 3, {"KitsuneIsland", "Kitsune Island"}},
+                {"Frozen Dimension", 3, {"FrozenDimension", "Frozen Dimension"}},
+                {"Haunted Shipwreck", 3, {"HauntedShipwreck", "Haunted Shipwreck"}},
+                {"Treasure Island", 2, {"TreasureIsland", "Treasure Island"}},
+                {"Rough Sea", 2, {"RoughSea", "Rough Sea"}},
+            }
+            local worldOrigin = workspace:FindFirstChild("_WorldOrigin")
+            local locations = worldOrigin and worldOrigin:FindFirstChild("Locations")
+            local map = workspace:FindFirstChild("Map")
+            local staticRoots = {}
+            if locations then staticRoots[#staticRoots + 1] = locations end
+            if map then staticRoots[#staticRoots + 1] = map end
+            staticRoots[#staticRoots + 1] = workspace
+            for _, info in ipairs(locationEvents) do
+                if seaNumber >= info[2] then
+                    for _, root in ipairs(staticRoots) do
+                        if root then
+                            for _, alias in ipairs(info[3]) do
+                                local object = root:FindFirstChild(alias)
+                                if object then addEvent(info[1], object) end
+                            end
+                        end
+                    end
+                end
+            end
+
+            -- Hostile sea encounters and ship groups are scanned only in live folders.
+            local enemies = workspace:FindFirstChild("Enemies")
+            local boats = workspace:FindFirstChild("Boats")
+            local seaBeasts = {}
+            if enemies then
+                for _, model in ipairs(enemies:GetChildren()) do
+                    if model:IsA("Model") and isAlive(model) then
+                        local name = model.Name
+                        if hasToken(name, {"terrorshark"}) then
+                            if seaNumber == 3 then addEvent("Terrorshark", model) end
+                        elseif hasToken(name, {"seabeast", "sea beast"}) then
+                            addEvent("Sea Beast", model)
+                            seaBeasts[#seaBeasts + 1] = model
+                        elseif hasToken(name, {"piranha"}) then
+                            addEvent("Piranha", model)
+                        elseif seaNumber == 3 and hasToken(name, {"ghostshark", "hauntedcrew"}) then
+                            addEvent("Haunted Shipwreck", model)
+                        elseif seaNumber == 3 and hasToken(name, {"ghostship", "hauntedship"}) then
+                            addEvent("Haunted Ship Raid", model)
+                        elseif hasToken(name, {"shark"}) then
+                            addEvent("Shark", model)
+                        elseif hasToken(name, {"grandbrigade", "brigade", "shipraid"}) then
+                            addEvent(seaNumber == 3 and "Ship Raid" or "Ship Raid", model)
+                        end
+                    end
+                end
+            end
+
+            if boats then
+                for _, boat in ipairs(boats:GetChildren()) do
+                    if boat:IsA("Model") then
+                        local name = boat.Name
+                        if hasToken(name, {"grandbrigade", "brigade", "shipraid"}) then
+                            addEvent("Ship Raid", boat)
+                        elseif seaNumber == 3 and hasToken(name, {"ghostship", "hauntedship"}) then
+                            addEvent("Haunted Ship Raid", boat)
+                        end
+                    end
+                end
+            end
+
+            if seaNumber == 3 and #seaBeasts >= 3 then
+                for _, beast in ipairs(seaBeasts) do addEvent("Rumbling Waters", beast) end
+            end
+
+            local eventOrder = {
+                "Terrorshark", "Rumbling Waters", "Haunted Shipwreck", "Haunted Ship Raid",
+                "Frozen Dimension", "Prehistoric Island", "Kitsune Island", "Mirage Island",
+                "Sea Beast", "Ship Raid", "Shark", "Piranha", "Treasure Island", "Rough Sea",
+            }
+            local displayed = {}
+            local activeCount = 0
+            local currentObjects = {}
+            for _, eventName in ipairs(eventOrder) do
+                local row = found[eventName]
+                if row and row.count > 0 then
+                    activeCount += 1
+                    local distanceText = row.nearest < math.huge and (" | " .. tostring(math.floor(row.nearest)) .. " studs") or ""
+                    displayed[#displayed + 1] = string.format("• %s%s%s", eventName, row.count > 1 and (" x" .. tostring(row.count)) or "", distanceText)
+                    for object in pairs(row.objectSet) do currentObjects[object] = true end
+                end
+            end
+
+            if activeCount == 0 then
+                eventStatusText.Text = string.format("Sea %d | scanning — no matching event model", seaNumber)
+                eventStatusText.TextColor3 = Color3.fromRGB(155, 162, 180)
+                eventCountText.Text = "Active events: 0"
+                eventListText.Text = "No active Sea Events detected"
+            else
+                eventStatusText.Text = string.format("Sea %d | %d active event type(s) detected", seaNumber, activeCount)
+                eventStatusText.TextColor3 = Color3.fromRGB(115, 225, 155)
+                eventCountText.Text = "Active events: " .. tostring(activeCount)
+                eventListText.Text = table.concat(displayed, "\n")
+            end
+
+            if scanInitialized then
+                for eventName, row in pairs(found) do
+                    if row.count > 0 and not previousActive[eventName] then
+                        sendEventNotice(eventName, row.count)
+                    end
+                end
+            else
+                scanInitialized = true
+            end
+
+            previousActive = {}
+            for eventName, row in pairs(found) do
+                if row.count > 0 then previousActive[eventName] = true end
+            end
+
+            -- Clear highlights for objects that disappeared or are no longer highlighted.
+            for object, highlight in pairs(highlights) do
+                if not seaHighlightEnabled or not currentObjects[object] or not object.Parent then
+                    pcall(function() highlight:Destroy() end)
+                    highlights[object] = nil
+                end
+            end
+            if seaHighlightEnabled then
+                for object in pairs(currentObjects) do setEventHighlight(object) end
+            end
+        end
+        scanNow = scanSeaEvents
+
+        refreshButton.MouseButton1Click:Connect(function()
+            if scanNow then pcall(scanNow) end
+        end)
+
+        _G.MHSpawn(function()
+            while seaEventsPage.Parent and task.wait(2) do
+                if seaRadarEnabled then
+                    pcall(scanSeaEvents)
+                end
+            end
+            for object, highlight in pairs(highlights) do
+                pcall(function() highlight:Destroy() end)
+                highlights[object] = nil
+            end
+        end)
+    end)
+
+    if not okSeaUI then
+        warn("[Sea Events] Không khởi tạo được tab Sea Events:", errSeaUI)
+    end
+end
 
 -- MENU SAFETY: đảm bảo ScreenGui không bị tắt/ẩn sau khi thêm module Shop.
 task.defer(function()
@@ -16499,5 +16392,5 @@ task.defer(function()
     end)
 end)
 
--- LOADING: báo đã tải xong toàn bộ script
-_G.MinhHubLoadDone()
+-- Báo script đã chạy xong
+_G.MinhHubReady = true
