@@ -3269,7 +3269,7 @@ local function createTab(tabName, iconText, isDefault)
 
     -- biểu tượng đơn sắc bên trái tên tab
     do
-        local iconMap = {Farm = "⚔", Boss = "♛", Raid = "☄", Gacha = "✦", Shop = "⛁", Config = "⚙", ESP = "◉", Status = "▤", SeaEvent = "🌊"}
+        local iconMap = {Farm = "⚔", Boss = "♛", Raid = "☄", Gacha = "✦", Shop = "⛁", Config = "⚙", ESP = "◉", Status = "▤"}
         local ic = Instance.new("TextLabel")
         ic.Size = UDim2.new(0, 22, 1, 0)
         ic.Position = UDim2.new(0, -26, 0, 0)
@@ -6990,8 +6990,27 @@ stockListLayout.Parent = stockScroll
 stockListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 stockListLayout.Padding = UDim.new(0, 4)
 
+local stockRequestId = 0
+
+local function setStockMessage(message, color)
+    local label = Instance.new("TextLabel")
+    label.Name = "StockMessage"
+    label.Size = UDim2.new(1, -8, 0, 42)
+    label.BackgroundTransparency = 1
+    label.Text = message
+    label.TextColor3 = color or Color3.fromRGB(220, 190, 120)
+    label.Font = Enum.Font.Gotham
+    label.TextSize = 11
+    label.TextWrapped = true
+    label.LayoutOrder = 1
+    label.Parent = stockScroll
+end
+
 local function updateFruitStock(isMirage)
     currentShopMode = isMirage
+    stockRequestId = stockRequestId + 1
+    local thisRequest = stockRequestId
+
     if isMirage then
         stockTitle.Text = "🏝️ Stock: Mirage Island"
         btnMirageStock.BackgroundColor3 = BANANA_YELLOW
@@ -7006,68 +7025,122 @@ local function updateFruitStock(isMirage)
         btnMirageStock.TextColor3 = Color3.fromRGB(200, 200, 200)
     end
 
-    for _, child in pairs(stockScroll:GetChildren()) do
-        if child:IsA("Frame") or child:IsA("TextLabel") then 
-            child:Destroy() 
+    for _, child in ipairs(stockScroll:GetChildren()) do
+        if child ~= stockListLayout then
+            child:Destroy()
         end
     end
+    stockScroll.CanvasPosition = Vector2.new(0, 0)
+    setStockMessage("⏳ Đang tải dữ liệu shop...", Color3.fromRGB(220, 190, 120))
 
-    pcall(function()
-        local commF = ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("CommF_")
-        if not commF then return end
+    task.spawn(function()
+        local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+        local commF = remotes and remotes:FindFirstChild("CommF_")
 
-        local fruitsData = isMirage and commF:InvokeServer("GetFruits", true) or commF:InvokeServer("GetFruits")
-        if type(fruitsData) == "table" then
-            local count = 0
-            for _, fruit in pairs(fruitsData) do
-                if fruit.OnSale then
-                    count = count + 1
-                    local itemFrame = Instance.new("Frame")
-                    itemFrame.Size = UDim2.new(1, -6, 0, 28)
-                    itemFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
-                    itemFrame.LayoutOrder = count
-                    itemFrame.Parent = stockScroll
-                    addCorner(itemFrame, 5)
+        if not commF then
+            if thisRequest == stockRequestId and stockScroll.Parent then
+                for _, child in ipairs(stockScroll:GetChildren()) do
+                    if child ~= stockListLayout then child:Destroy() end
+                end
+                setStockMessage("❌ Không tìm thấy Remote CommF_. Hãy thử tải lại sau.", Color3.fromRGB(255, 110, 110))
+            end
+            return
+        end
 
-                    local nameLabel = Instance.new("TextLabel")
-                    nameLabel.Size = UDim2.new(0.6, 0, 1, 0)
-                    nameLabel.Position = UDim2.new(0, 8, 0, 0)
-                    nameLabel.BackgroundTransparency = 1
-                    nameLabel.Text = "• " .. tostring(fruit.Name or "Unknown")
-                    nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-                    nameLabel.Font = Enum.Font.GothamBold
-                    nameLabel.TextSize = 11
-                    nameLabel.TextXAlignment = Enum.TextXAlignment.Left
-                    nameLabel.Parent = itemFrame
+        local ok, fruitsData
+        if isMirage then
+            ok, fruitsData = pcall(function()
+                return commF:InvokeServer("GetFruits", true)
+            end)
+        else
+            ok, fruitsData = pcall(function()
+                return commF:InvokeServer("GetFruits")
+            end)
+        end
 
-                    local priceLabel = Instance.new("TextLabel")
-                    priceLabel.Size = UDim2.new(0.4, -8, 1, 0)
-                    priceLabel.Position = UDim2.new(0.6, 0, 0, 0)
-                    priceLabel.BackgroundTransparency = 1
-                    
-                    local priceText = fruit.Price and ("$" .. string.format("%d", fruit.Price)) or "N/A"
-                    priceLabel.Text = priceText
-                    priceLabel.TextColor3 = Color3.fromRGB(85, 255, 127)
-                    priceLabel.Font = Enum.Font.GothamBold
-                    priceLabel.TextSize = 11
-                    priceLabel.TextXAlignment = Enum.TextXAlignment.Right
-                    priceLabel.Parent = itemFrame
+        if thisRequest ~= stockRequestId or not stockScroll.Parent then return end
+
+        for _, child in ipairs(stockScroll:GetChildren()) do
+            if child ~= stockListLayout then child:Destroy() end
+        end
+
+        if not ok then
+            warn("[Minh Hub Stock] GetFruits lỗi:", fruitsData)
+            setStockMessage("❌ Không thể tải stock: " .. tostring(fruitsData), Color3.fromRGB(255, 110, 110))
+            return
+        end
+
+        if type(fruitsData) ~= "table" then
+            setStockMessage("⚠️ Server không trả về danh sách trái hợp lệ. Hãy thử lại.", Color3.fromRGB(255, 190, 100))
+            warn("[Minh Hub Stock] GetFruits trả về kiểu dữ liệu:", typeof(fruitsData))
+            return
+        end
+
+        local available = {}
+        for _, fruit in pairs(fruitsData) do
+            if type(fruit) == "table" then
+                local onSale = fruit.OnSale
+                local isOnSale = (onSale == true or onSale == 1 or tostring(onSale):lower() == "true")
+                if isOnSale then
+                    local fruitName = tostring(fruit.Name or fruit.name or "Unknown Fruit")
+                    local fruitPrice = tonumber(fruit.Price or fruit.price)
+                    available[#available + 1] = {
+                        name = fruitName,
+                        price = fruitPrice
+                    }
                 end
             end
-            
-            if count == 0 then
-                local emptyLabel = Instance.new("TextLabel")
-                emptyLabel.Size = UDim2.new(1, 0, 0, 30)
-                emptyLabel.BackgroundTransparency = 1
-                emptyLabel.Text = isMirage and "Mirage Island stock data not found!" or "Unable to load shop data!"
-                emptyLabel.TextColor3 = Color3.fromRGB(200, 150, 150)
-                emptyLabel.Font = Enum.Font.Gotham
-                emptyLabel.TextSize = 11
-                emptyLabel.Parent = stockScroll
-            end
-
-            stockScroll.CanvasSize = UDim2.new(0, 0, 0, count * 32)
         end
+
+        table.sort(available, function(a, b)
+            return a.name:lower() < b.name:lower()
+        end)
+
+        if #available == 0 then
+            setStockMessage(
+                isMirage and "ℹ️ Không tìm thấy trái đang bán trong dữ liệu Mirage Island."
+                    or "ℹ️ Hiện không có trái nào được đánh dấu OnSale trong dữ liệu shop.",
+                Color3.fromRGB(200, 200, 200)
+            )
+            stockScroll.CanvasSize = UDim2.new(0, 0, 0, 46)
+            return
+        end
+
+        for index, fruit in ipairs(available) do
+            local itemFrame = Instance.new("Frame")
+            itemFrame.Size = UDim2.new(1, -6, 0, 30)
+            itemFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+            itemFrame.LayoutOrder = index
+            itemFrame.Parent = stockScroll
+            addCorner(itemFrame, 5)
+
+            local nameLabel = Instance.new("TextLabel")
+            nameLabel.Size = UDim2.new(0.62, -8, 1, 0)
+            nameLabel.Position = UDim2.new(0, 8, 0, 0)
+            nameLabel.BackgroundTransparency = 1
+            nameLabel.Text = "• " .. fruit.name
+            nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+            nameLabel.Font = Enum.Font.GothamBold
+            nameLabel.TextSize = 11
+            nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+            nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
+            nameLabel.Parent = itemFrame
+
+            local priceLabel = Instance.new("TextLabel")
+            priceLabel.Size = UDim2.new(0.38, -8, 1, 0)
+            priceLabel.Position = UDim2.new(0.62, 0, 0, 0)
+            priceLabel.BackgroundTransparency = 1
+            priceLabel.Text = fruit.price and ("$" .. string.format("%.0f", fruit.price)) or "Giá N/A"
+            priceLabel.TextColor3 = Color3.fromRGB(85, 255, 127)
+            priceLabel.Font = Enum.Font.GothamBold
+            priceLabel.TextSize = 11
+            priceLabel.TextXAlignment = Enum.TextXAlignment.Right
+            priceLabel.Parent = itemFrame
+        end
+
+        stockScroll.CanvasSize = UDim2.new(0, 0, 0, #available * 34 + 4)
+        stockTitle.Text = (isMirage and "🏝️ Stock: Mirage Island (" or "🍎 Stock: Regular Shop (")
+            .. tostring(#available) .. ")"
     end)
 end
 
@@ -9240,7 +9313,7 @@ _G.MHSpawn(function()
                     local hum  = char and char:FindFirstChildOfClass("Humanoid")
                     if not hrp or not hum or hum.Health <= 0 then return end
 
-                    if _G.FruitPickupBusy or _G.PirateRaidBusy or _G.SeaEventBusy then return end -- nhường cho Auto Pickup Fruit / Pirate Raid / Sea Event
+                    if _G.FruitPickupBusy or _G.PirateRaidBusy then return end -- nhường cho Auto Pickup Fruit / Pirate Raid
 
                     local function inCursedShip(pos)
                         return World2 and Q.isCursedShipPosition(pos)
@@ -15635,7 +15708,7 @@ _G.MHSpawn(function()
 
     local function pauseTravelModes()
         -- Không bắt đầu giữa lúc một hệ thống khác đang ở giữa thao tác di chuyển.
-        if _G.FruitPickupBusy or _G.PirateRaidBusy or _G.EliteBusy or _G.SeaEventBusy then
+        if _G.FruitPickupBusy or _G.PirateRaidBusy or _G.EliteBusy then
             return nil, "Fruit collection/Raid/Boss activity is in progress. Wait for it to finish and try again."
         end
         if Q.DK and Q.DK.on then
@@ -16008,389 +16081,6 @@ _G.MHSpawn(function()
     end
 end)
 
-
--- =========================================================
--- SEA EVENT (Sea 2 / Sea 3): farm Sea Beast / Terror Shark / Piranha / Ship Raid
--- + tự bay tới đảo sự kiện Mirage / Kitsune / Prehistoric khi chúng xuất hiện.
--- Dùng chung FlyStraight + targetEnemy (Fast Attack / Bring Mob) như Pirate Raid.
--- =========================================================
-_G.MHSpawn(function()
-    local okSE, errSE = pcall(function()
-    Q.SE = Q.SE or {
-        on = false,
-        busy = false,
-        status = "Disabled",
-        islandOn = true,
-        beastOn = true,
-        terrorOn = true,
-        piranhaOn = true,
-        shipOn = true,
-        speed = 280,
-        hover = 28,
-        debug = true,
-        lastIsland = nil,
-        lastScan = 0,
-    }
-    _G.SeaEventFarm = false
-    _G.SeaEventBusy = false
-    _G.SeaEventStatus = "Disabled"
-
-    local function slog(...)
-        if Q.SE.debug then print("[SeaEvent]", ...) end
-    end
-
-    local function setStatus(msg)
-        Q.SE.status = tostring(msg)
-        _G.SeaEventStatus = Q.SE.status
-    end
-
-    local function lower(s)
-        return string.lower(tostring(s or ""))
-    end
-
-    local function isAliveModel(m)
-        if not m or not m.Parent then return false end
-        local hum = m:FindFirstChildOfClass("Humanoid")
-        local hrp = m:FindFirstChild("HumanoidRootPart")
-        return hum and hrp and hum.Health > 0 and hrp or false
-    end
-
-    local function classifyMob(name)
-        local n = lower(name)
-        if string.find(n, "terror", 1, true) or string.find(n, "terrorshark", 1, true) then
-            return "TerrorShark"
-        end
-        if string.find(n, "sea beast", 1, true) or string.find(n, "seabeast", 1, true)
-            or n == "sea beast" or string.find(n, "rumbling", 1, true) then
-            return "SeaBeast"
-        end
-        if string.find(n, "piranha", 1, true) then
-            return "Piranha"
-        end
-        if string.find(n, "ship", 1, true) or string.find(n, "boat", 1, true)
-            or string.find(n, "raid", 1, true) or string.find(n, "ghost", 1, true)
-            or string.find(n, "haunted", 1, true) then
-            return "ShipRaid"
-        end
-        return nil
-    end
-
-    local function wantType(kind)
-        if kind == "SeaBeast" then return Q.SE.beastOn end
-        if kind == "TerrorShark" then return Q.SE.terrorOn end
-        if kind == "Piranha" then return Q.SE.piranhaOn end
-        if kind == "ShipRaid" then return Q.SE.shipOn end
-        return false
-    end
-
-    local function collectSeaMobs()
-        local list = {}
-        local folders = {}
-        local enemies = workspace:FindFirstChild("Enemies")
-        if enemies then folders[#folders + 1] = enemies end
-        for _, name in ipairs({"SeaBeasts", "Sea Events", "SeaEvents", "Boats"}) do
-            local f = workspace:FindFirstChild(name)
-            if f then folders[#folders + 1] = f end
-        end
-        local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-        local origin = root and root.Position
-        for _, folder in ipairs(folders) do
-            local ok, children = pcall(function() return folder:GetChildren() end)
-            if ok then
-                for _, m in ipairs(children) do
-                    local hrp = isAliveModel(m)
-                    if hrp then
-                        local kind = classifyMob(m.Name)
-                        if kind and wantType(kind) then
-                            local dist = origin and (hrp.Position - origin).Magnitude or 0
-                            list[#list + 1] = {model = m, hrp = hrp, kind = kind, dist = dist}
-                        end
-                    end
-                end
-            end
-        end
-        table.sort(list, function(a, b) return a.dist < b.dist end)
-        return list
-    end
-
-    local ISLAND_ALIASES = {
-        {"Mirage Island", {"MysticIsland", "Mirage Island", "MirageIsland"}},
-        {"Kitsune Island", {"KitsuneIsland", "Kitsune Island"}},
-        {"Prehistoric Island", {"PrehistoricIsland", "Prehistoric Island"}},
-        {"Frozen Dimension", {"FrozenDimension", "Frozen Dimension"}},
-    }
-
-    local function findEventIsland()
-        local locs = workspace:FindFirstChild("_WorldOrigin")
-        locs = locs and locs:FindFirstChild("Locations")
-        local map = workspace:FindFirstChild("Map")
-        local parents = {locs, map, workspace}
-        for _, entry in ipairs(ISLAND_ALIASES) do
-            local label, names = entry[1], entry[2]
-            for _, par in ipairs(parents) do
-                if par then
-                    for _, nm in ipairs(names) do
-                        local o = par:FindFirstChild(nm)
-                        if o then
-                            local pos
-                            if o:IsA("BasePart") then
-                                pos = o.Position
-                            elseif o:IsA("Model") or o:IsA("Folder") then
-                                local ok, cf = pcall(function() return o:GetPivot() end)
-                                if ok and cf then pos = cf.Position end
-                                if not pos then
-                                    local p = o:FindFirstChildWhichIsA("BasePart", true)
-                                    if p then pos = p.Position end
-                                end
-                            end
-                            if pos then
-                                return label, pos, o
-                            end
-                        end
-                    end
-                end
-            end
-        end
-        return nil
-    end
-
-    local function otherBusy()
-        return _G.FruitPickupBusy == true
-            or _G.PirateRaidBusy == true
-            or _G.BuyMeleeActive == true
-            or _G.Dungeon == true
-            or autoRaidEnabled == true
-            or (_G.AutoUnlockSeaBusy == true)
-    end
-
-    local function release()
-        _G.SeaEventBusy = false
-        Q.SE.busy = false
-        if targetEnemy and typeof(targetEnemy) == "Instance" then
-            local kind = classifyMob(targetEnemy.Name)
-            if kind then targetEnemy = nil end
-        end
-    end
-
-    local function engageMob(entry)
-        if not entry or not entry.model or not entry.model.Parent then return false end
-        local hrpMob = entry.hrp
-        if not hrpMob or not hrpMob.Parent then return false end
-        Q.SE.busy = true
-        _G.SeaEventBusy = true
-        targetEnemy = entry.model
-        setStatus(string.format("⚔️ %s (%s) — %d studs", entry.kind, entry.model.Name, math.floor(entry.dist)))
-        if not fastAttackEnabled then fastAttackEnabled = true end
-        local hover = tonumber(Q.SE.hover) or 28
-        local spd = tonumber(Q.SE.speed) or 280
-        if _G.FlyStraight then
-            _G.FlyStraight(function()
-                if not entry.model or not entry.model.Parent then return nil end
-                local h = entry.model:FindFirstChild("HumanoidRootPart")
-                if not h then return nil end
-                return h.Position + Vector3.new(0, hover, 0)
-            end, spd, function()
-                return Q.SE.on and _G.SeaEventFarm and entry.model and entry.model.Parent
-                    and isAliveModel(entry.model) and not otherBusy()
-            end, 8)
-        else
-            local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-            if root then
-                root.CFrame = CFrame.new(hrpMob.Position + Vector3.new(0, hover, 0))
-            end
-        end
-        return true
-    end
-
-    local function goIsland(label, pos)
-        Q.SE.busy = true
-        _G.SeaEventBusy = true
-        setStatus("🏝 Đảo sự kiện: " .. label .. " — đang bay tới...")
-        local dest = pos + Vector3.new(0, 40, 0)
-        local spd = tonumber(Q.SE.speed) or 280
-        if _G.FlyStraight then
-            _G.FlyStraight(function() return dest end, spd, function()
-                return Q.SE.on and _G.SeaEventFarm and Q.SE.islandOn and not otherBusy()
-            end, 25)
-        else
-            local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-            if root then root.CFrame = CFrame.new(dest) end
-        end
-        Q.SE.lastIsland = label
-        setStatus("🏝 Đã tới " .. label .. " — khám phá / farm")
-        task.wait(2)
-    end
-
-    local function loop()
-        while true do
-            task.wait(0.45)
-            local ok, err = pcall(function()
-                if not Q.SE.on or not _G.SeaEventFarm then
-                    if Q.SE.busy then release() end
-                    if Q.SE.status ~= "Disabled" then setStatus("Disabled") end
-                    return
-                end
-                if not (World2 or World3) then
-                    setStatus("Sea Event chỉ có ở Sea 2 / Sea 3")
-                    release()
-                    return
-                end
-                if otherBusy() then
-                    setStatus("⏸ Đang nhường cho Raid / Fruit / Pirate Raid...")
-                    release()
-                    return
-                end
-
-                if Q.SE.islandOn then
-                    local label, pos = findEventIsland()
-                    if label and pos then
-                        local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                        local dist = root and (root.Position - pos).Magnitude or 99999
-                        if dist > 180 then
-                            goIsland(label, pos)
-                            return
-                        else
-                            setStatus("🏝 Đang ở " .. label)
-                        end
-                    end
-                end
-
-                local mobs = collectSeaMobs()
-                if #mobs > 0 then
-                    engageMob(mobs[1])
-                else
-                    if Q.SE.busy then release() end
-                    setStatus("😴 Chưa thấy Sea Event — hãy lên thuyền / ra vùng Danger để spawn")
-                end
-            end)
-            if not ok then
-                slog("lỗi:", tostring(err))
-                release()
-                task.wait(1)
-            end
-        end
-    end
-
-    local seaPage = createTab("SeaEvent", "🌊", false)
-    pcall(function()
-        tabs["SeaEvent"].Button.LayoutOrder = 5
-        local btn = tabs["SeaEvent"].Button
-        local ic = btn:FindFirstChildWhichIsA("TextLabel")
-        if ic and ic.Text == "▪" then ic.Text = "🌊" end
-    end)
-
-    local statusCard = Instance.new("Frame")
-    statusCard.Size = UDim2.new(1, 0, 0, 52)
-    statusCard.BackgroundColor3 = BANANA_CARD
-    statusCard.LayoutOrder = 0
-    statusCard.Parent = seaPage
-    addCorner(statusCard, 8)
-    addStroke(statusCard, Color3.fromRGB(70, 180, 255), 1.2)
-
-    local stTitle = Instance.new("TextLabel")
-    stTitle.Size = UDim2.new(1, -20, 0, 18)
-    stTitle.Position = UDim2.new(0, 10, 0, 4)
-    stTitle.BackgroundTransparency = 1
-    stTitle.Text = "🌊 SEA EVENT STATUS"
-    stTitle.TextColor3 = Color3.fromRGB(100, 200, 255)
-    stTitle.TextSize = 11
-    stTitle.Font = Enum.Font.GothamBold
-    stTitle.TextXAlignment = Enum.TextXAlignment.Left
-    stTitle.Parent = statusCard
-
-    local stText = Instance.new("TextLabel")
-    stText.Size = UDim2.new(1, -20, 0, 24)
-    stText.Position = UDim2.new(0, 10, 0, 24)
-    stText.BackgroundTransparency = 1
-    stText.Text = "Status: Disabled"
-    stText.TextColor3 = Color3.fromRGB(200, 205, 215)
-    stText.TextSize = 10
-    stText.Font = Enum.Font.Gotham
-    stText.TextXAlignment = Enum.TextXAlignment.Left
-    stText.TextWrapped = true
-    stText.Parent = statusCard
-
-    _G.MHSpawn(function()
-        while stText.Parent do
-            task.wait(0.4)
-            stText.Text = "Status: " .. tostring(_G.SeaEventStatus or Q.SE.status or "-")
-        end
-    end)
-
-    createToggleFeature(seaPage, "AutoSeaEventToggle", "Auto Sea Event",
-        "Tự tìm và đánh Sea Beast / Terror Shark / Piranha / Ship Raid; ưu tiên đảo Mirage-Kitsune-Prehistoric khi xuất hiện (Sea 2/3)",
-        1, false, function(state)
-            Q.SE.on = state
-            _G.SeaEventFarm = state
-            if state then
-                setStatus("Đang quét Sea Event...")
-                if not fastAttackEnabled then fastAttackEnabled = true end
-            else
-                release()
-                setStatus("Disabled")
-                stopAllFlying()
-            end
-        end)
-
-    createToggleFeature(seaPage, "SEIslandToggle", "Auto TP Event Island",
-        "Bay tới Mirage / Kitsune / Prehistoric / Frozen Dimension khi đảo xuất hiện trên server",
-        2, true, function(state) Q.SE.islandOn = state end)
-
-    createToggleFeature(seaPage, "SEBeastToggle", "Farm Sea Beast",
-        "Tấn công Sea Beast / Rumbling Waters",
-        3, true, function(state) Q.SE.beastOn = state end)
-
-    createToggleFeature(seaPage, "SETerrorToggle", "Farm Terror Shark",
-        "Tấn công Terrorshark (Sea 3)",
-        4, true, function(state) Q.SE.terrorOn = state end)
-
-    createToggleFeature(seaPage, "SEPiranhaToggle", "Farm Piranha",
-        "Tấn công đàn Piranha",
-        5, true, function(state) Q.SE.piranhaOn = state end)
-
-    createToggleFeature(seaPage, "SEShipToggle", "Farm Ship Raid",
-        "Tấn công thuyền / thủy thủ Ship Raid & Haunted Ship",
-        6, true, function(state) Q.SE.shipOn = state end)
-
-    local note = Instance.new("TextLabel")
-    note.Size = UDim2.new(1, -4, 0, 56)
-    note.BackgroundTransparency = 1
-    note.LayoutOrder = 10
-    note.TextWrapped = true
-    note.TextColor3 = Color3.fromRGB(150, 155, 170)
-    note.TextSize = 10
-    note.Font = Enum.Font.Gotham
-    note.TextXAlignment = Enum.TextXAlignment.Left
-    note.TextYAlignment = Enum.TextYAlignment.Top
-    note.Text = "Gợi ý: lên thuyền rồi ra vùng Sea Danger (Sea 3) để event spawn nhiều hơn. Dùng fruit/race đi được trên nước (Ice/Magma/Shark...) để an toàn. Module này bay + đánh quái đã xuất hiện; không tự mua thuyền."
-    note.Parent = seaPage
-
-    local oldMode = Q.FS and Q.FS.mode
-    if Q.FS and type(oldMode) == "function" then
-        Q.FS.mode = function()
-            if _G.SeaEventBusy or (Q.SE and Q.SE.on and _G.SeaEventFarm) then
-                return "🌊 Sea Event: " .. tostring(_G.SeaEventStatus or Q.SE.status), Color3.fromRGB(80, 190, 255)
-            end
-            return oldMode()
-        end
-    end
-
-    _G.MHSpawn(loop)
-
-    _G.AutoSeaEvent = function(on)
-        if toggleUpdateFuncs["AutoSeaEventToggle"] then
-            pcall(toggleUpdateFuncs["AutoSeaEventToggle"], on ~= false)
-        end
-        Q.SE.on = (on ~= false)
-        _G.SeaEventFarm = Q.SE.on
-    end
-
-    slog("Sea Event module loaded")
-    end)
-    if not okSE then
-        warn("[SeaEvent] Lỗi khởi tạo:", errSE)
-    end
-end)
 
 -- MENU SAFETY: đảm bảo ScreenGui không bị tắt/ẩn sau khi thêm module Shop.
 task.defer(function()
