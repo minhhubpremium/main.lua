@@ -6990,27 +6990,8 @@ stockListLayout.Parent = stockScroll
 stockListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 stockListLayout.Padding = UDim.new(0, 4)
 
-local stockRequestId = 0
-
-local function setStockMessage(message, color)
-    local label = Instance.new("TextLabel")
-    label.Name = "StockMessage"
-    label.Size = UDim2.new(1, -8, 0, 42)
-    label.BackgroundTransparency = 1
-    label.Text = message
-    label.TextColor3 = color or Color3.fromRGB(220, 190, 120)
-    label.Font = Enum.Font.Gotham
-    label.TextSize = 11
-    label.TextWrapped = true
-    label.LayoutOrder = 1
-    label.Parent = stockScroll
-end
-
 local function updateFruitStock(isMirage)
     currentShopMode = isMirage
-    stockRequestId = stockRequestId + 1
-    local thisRequest = stockRequestId
-
     if isMirage then
         stockTitle.Text = "🏝️ Stock: Mirage Island"
         btnMirageStock.BackgroundColor3 = BANANA_YELLOW
@@ -7025,122 +7006,68 @@ local function updateFruitStock(isMirage)
         btnMirageStock.TextColor3 = Color3.fromRGB(200, 200, 200)
     end
 
-    for _, child in ipairs(stockScroll:GetChildren()) do
-        if child ~= stockListLayout then
-            child:Destroy()
+    for _, child in pairs(stockScroll:GetChildren()) do
+        if child:IsA("Frame") or child:IsA("TextLabel") then 
+            child:Destroy() 
         end
     end
-    stockScroll.CanvasPosition = Vector2.new(0, 0)
-    setStockMessage("⏳ Đang tải dữ liệu shop...", Color3.fromRGB(220, 190, 120))
 
-    task.spawn(function()
-        local remotes = ReplicatedStorage:FindFirstChild("Remotes")
-        local commF = remotes and remotes:FindFirstChild("CommF_")
+    pcall(function()
+        local commF = ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("CommF_")
+        if not commF then return end
 
-        if not commF then
-            if thisRequest == stockRequestId and stockScroll.Parent then
-                for _, child in ipairs(stockScroll:GetChildren()) do
-                    if child ~= stockListLayout then child:Destroy() end
-                end
-                setStockMessage("❌ Không tìm thấy Remote CommF_. Hãy thử tải lại sau.", Color3.fromRGB(255, 110, 110))
-            end
-            return
-        end
+        local fruitsData = isMirage and commF:InvokeServer("GetFruits", true) or commF:InvokeServer("GetFruits")
+        if type(fruitsData) == "table" then
+            local count = 0
+            for _, fruit in pairs(fruitsData) do
+                if fruit.OnSale then
+                    count = count + 1
+                    local itemFrame = Instance.new("Frame")
+                    itemFrame.Size = UDim2.new(1, -6, 0, 28)
+                    itemFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+                    itemFrame.LayoutOrder = count
+                    itemFrame.Parent = stockScroll
+                    addCorner(itemFrame, 5)
 
-        local ok, fruitsData
-        if isMirage then
-            ok, fruitsData = pcall(function()
-                return commF:InvokeServer("GetFruits", true)
-            end)
-        else
-            ok, fruitsData = pcall(function()
-                return commF:InvokeServer("GetFruits")
-            end)
-        end
+                    local nameLabel = Instance.new("TextLabel")
+                    nameLabel.Size = UDim2.new(0.6, 0, 1, 0)
+                    nameLabel.Position = UDim2.new(0, 8, 0, 0)
+                    nameLabel.BackgroundTransparency = 1
+                    nameLabel.Text = "• " .. tostring(fruit.Name or "Unknown")
+                    nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+                    nameLabel.Font = Enum.Font.GothamBold
+                    nameLabel.TextSize = 11
+                    nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+                    nameLabel.Parent = itemFrame
 
-        if thisRequest ~= stockRequestId or not stockScroll.Parent then return end
-
-        for _, child in ipairs(stockScroll:GetChildren()) do
-            if child ~= stockListLayout then child:Destroy() end
-        end
-
-        if not ok then
-            warn("[Minh Hub Stock] GetFruits lỗi:", fruitsData)
-            setStockMessage("❌ Không thể tải stock: " .. tostring(fruitsData), Color3.fromRGB(255, 110, 110))
-            return
-        end
-
-        if type(fruitsData) ~= "table" then
-            setStockMessage("⚠️ Server không trả về danh sách trái hợp lệ. Hãy thử lại.", Color3.fromRGB(255, 190, 100))
-            warn("[Minh Hub Stock] GetFruits trả về kiểu dữ liệu:", typeof(fruitsData))
-            return
-        end
-
-        local available = {}
-        for _, fruit in pairs(fruitsData) do
-            if type(fruit) == "table" then
-                local onSale = fruit.OnSale
-                local isOnSale = (onSale == true or onSale == 1 or tostring(onSale):lower() == "true")
-                if isOnSale then
-                    local fruitName = tostring(fruit.Name or fruit.name or "Unknown Fruit")
-                    local fruitPrice = tonumber(fruit.Price or fruit.price)
-                    available[#available + 1] = {
-                        name = fruitName,
-                        price = fruitPrice
-                    }
+                    local priceLabel = Instance.new("TextLabel")
+                    priceLabel.Size = UDim2.new(0.4, -8, 1, 0)
+                    priceLabel.Position = UDim2.new(0.6, 0, 0, 0)
+                    priceLabel.BackgroundTransparency = 1
+                    
+                    local priceText = fruit.Price and ("$" .. string.format("%d", fruit.Price)) or "N/A"
+                    priceLabel.Text = priceText
+                    priceLabel.TextColor3 = Color3.fromRGB(85, 255, 127)
+                    priceLabel.Font = Enum.Font.GothamBold
+                    priceLabel.TextSize = 11
+                    priceLabel.TextXAlignment = Enum.TextXAlignment.Right
+                    priceLabel.Parent = itemFrame
                 end
             end
+            
+            if count == 0 then
+                local emptyLabel = Instance.new("TextLabel")
+                emptyLabel.Size = UDim2.new(1, 0, 0, 30)
+                emptyLabel.BackgroundTransparency = 1
+                emptyLabel.Text = isMirage and "Mirage Island stock data not found!" or "Unable to load shop data!"
+                emptyLabel.TextColor3 = Color3.fromRGB(200, 150, 150)
+                emptyLabel.Font = Enum.Font.Gotham
+                emptyLabel.TextSize = 11
+                emptyLabel.Parent = stockScroll
+            end
+
+            stockScroll.CanvasSize = UDim2.new(0, 0, 0, count * 32)
         end
-
-        table.sort(available, function(a, b)
-            return a.name:lower() < b.name:lower()
-        end)
-
-        if #available == 0 then
-            setStockMessage(
-                isMirage and "ℹ️ Không tìm thấy trái đang bán trong dữ liệu Mirage Island."
-                    or "ℹ️ Hiện không có trái nào được đánh dấu OnSale trong dữ liệu shop.",
-                Color3.fromRGB(200, 200, 200)
-            )
-            stockScroll.CanvasSize = UDim2.new(0, 0, 0, 46)
-            return
-        end
-
-        for index, fruit in ipairs(available) do
-            local itemFrame = Instance.new("Frame")
-            itemFrame.Size = UDim2.new(1, -6, 0, 30)
-            itemFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
-            itemFrame.LayoutOrder = index
-            itemFrame.Parent = stockScroll
-            addCorner(itemFrame, 5)
-
-            local nameLabel = Instance.new("TextLabel")
-            nameLabel.Size = UDim2.new(0.62, -8, 1, 0)
-            nameLabel.Position = UDim2.new(0, 8, 0, 0)
-            nameLabel.BackgroundTransparency = 1
-            nameLabel.Text = "• " .. fruit.name
-            nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-            nameLabel.Font = Enum.Font.GothamBold
-            nameLabel.TextSize = 11
-            nameLabel.TextXAlignment = Enum.TextXAlignment.Left
-            nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
-            nameLabel.Parent = itemFrame
-
-            local priceLabel = Instance.new("TextLabel")
-            priceLabel.Size = UDim2.new(0.38, -8, 1, 0)
-            priceLabel.Position = UDim2.new(0.62, 0, 0, 0)
-            priceLabel.BackgroundTransparency = 1
-            priceLabel.Text = fruit.price and ("$" .. string.format("%.0f", fruit.price)) or "Giá N/A"
-            priceLabel.TextColor3 = Color3.fromRGB(85, 255, 127)
-            priceLabel.Font = Enum.Font.GothamBold
-            priceLabel.TextSize = 11
-            priceLabel.TextXAlignment = Enum.TextXAlignment.Right
-            priceLabel.Parent = itemFrame
-        end
-
-        stockScroll.CanvasSize = UDim2.new(0, 0, 0, #available * 34 + 4)
-        stockTitle.Text = (isMirage and "🏝️ Stock: Mirage Island (" or "🍎 Stock: Regular Shop (")
-            .. tostring(#available) .. ")"
     end)
 end
 
@@ -8205,28 +8132,62 @@ do
 end
 
 -- NOCLIP LOGIC
+-- Lưu đúng trạng thái va chạm ban đầu và KHÔI PHỤC khi không còn tác vụ di chuyển.
+-- Bản cũ chỉ đặt CanCollide=false mà không có nhánh restore, khiến nhân vật có thể
+-- tiếp tục xuyên sàn sau khi tắt Farm/Raid/di chuyển.
 RunService.Stepped:Connect(function()
-    if autoFarmEnabled or autoFarmMaterialEnabled or autoRaidEnabled or _G.Dungeon or _G.AutoLawRaid or _G.AutoUnlockSeaBusy or autoChestEnabled or _G.FruitPickupBusy or _G.PirateRaidBusy or _G.EliteHunter or _G.TyrantFarm or _G.TyrantSummon or (Q.SUB and Q.SUB.force) or (_G.__FlyN or 0) > 0 or _G.BuyMeleeActive == true then
-        local character = LocalPlayer.Character
-        if character then
-            local nc = Q.NC
-            if not nc then nc = { parts = {}, at = 0 }; Q.NC = nc end
-            -- chỉ quét lại danh sách part mỗi 0.75s (trước đây quét mỗi khung hình -> giật)
-            if nc.char ~= character or tick() - nc.at > 0.75 then
-                nc.char, nc.at, nc.parts = character, tick(), {}
-                for _, part in ipairs(character:GetDescendants()) do
-                    if part:IsA("BasePart") then nc.parts[#nc.parts + 1] = part end
+    local nc = Q.NC
+    if not nc then
+        nc = { parts = {}, orig = setmetatable({}, {__mode = "k"}), at = 0, char = nil }
+        Q.NC = nc
+    end
+
+    local active = autoFarmEnabled or autoFarmMaterialEnabled or autoRaidEnabled
+        or _G.Dungeon or _G.AutoLawRaid or _G.AutoUnlockSeaBusy or autoChestEnabled
+        or _G.FruitPickupBusy or _G.PirateRaidBusy or _G.EliteHunter
+        or _G.TyrantFarm or _G.TyrantSummon or (Q.SUB and Q.SUB.force)
+        or (_G.__FlyN or 0) > 0 or _G.BuyMeleeActive == true
+
+    local character = LocalPlayer.Character
+    if active and character then
+        if nc.char and nc.char ~= character then
+            -- Dọn trạng thái của model cũ trước khi chuyển sang nhân vật mới.
+            for part in pairs(nc.orig) do
+                if part and part.Parent then
+                    pcall(function() part.CanCollide = true end)
                 end
             end
-            for _, part in ipairs(nc.parts) do
-                if part.Parent and part.CanCollide then part.CanCollide = false end
-            end
-            local root = character:FindFirstChild("HumanoidRootPart")
-            if root then
-                root.AssemblyLinearVelocity = Vector3.zero
-                root.AssemblyAngularVelocity = Vector3.zero
+            table.clear(nc.orig)
+        end
+        if nc.char ~= character or tick() - nc.at > 0.75 then
+            nc.char, nc.at, nc.parts = character, tick(), {}
+            for _, part in ipairs(character:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    nc.parts[#nc.parts + 1] = part
+                end
             end
         end
+
+        for _, part in ipairs(nc.parts) do
+            if part.Parent and part.CanCollide then
+                nc.orig[part] = true
+                part.CanCollide = false
+            end
+        end
+
+        local root = character:FindFirstChild("HumanoidRootPart")
+        if root then
+            root.AssemblyLinearVelocity = Vector3.zero
+            root.AssemblyAngularVelocity = Vector3.zero
+        end
+    elseif next(nc.orig) then
+        for part in pairs(nc.orig) do
+            if part and part.Parent then
+                pcall(function() part.CanCollide = true end)
+            end
+        end
+        table.clear(nc.orig)
+        nc.parts, nc.char, nc.at = {}, nil, 0
     end
 end)
 
