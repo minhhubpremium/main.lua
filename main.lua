@@ -4759,6 +4759,7 @@ renderBossList()
 
 createToggleFeature(bossPage, "AutoFarmBossToggle", "Auto Farm Boss", "Automatically travel to and defeat the selected Boss", 2, false, function(state)
     if state then
+        if selectedFarmTarget ~= "Farm Boss" then Q.prevFarmTarget = selectedFarmTarget end
         selectedFarmTarget = "Farm Boss"
         if toggleUpdateFuncs["AutoFarmTargetToggle"] then toggleUpdateFuncs["AutoFarmTargetToggle"](false) end
         if toggleUpdateFuncs["AutoFarmMaterialToggle"] then toggleUpdateFuncs["AutoFarmMaterialToggle"](false) end
@@ -4769,6 +4770,10 @@ createToggleFeature(bossPage, "AutoFarmBossToggle", "Auto Farm Boss", "Automatic
         autoFarmEnabled = true
     else
         autoFarmEnabled = false
+        -- Trả lại mục tiêu Auto Farm trước đó để toggle Auto Farm thường không bị kẹt ở "Farm Boss".
+        if selectedFarmTarget == "Farm Boss" and Q.prevFarmTarget then
+            selectedFarmTarget = Q.prevFarmTarget
+        end
     end
 end)
 
@@ -5090,15 +5095,15 @@ function Q.SmartController.resolveSmartTask()
     if _G.BuyMeleeActive == true or (Q.MeleeShop and Q.MeleeShop.running == true) then
         name = "melee"
     elseif RAID_FIXED.running == true or RAID_FIXED.starting == true or RAID_FIXED.buying == true
-        or autoRaidEnabled == true or _G.Dungeon == true or _G.AutoLawRaid == true
-        or autoStartRaidEnabled == true or _G.StartRaid == true
-        or autoBuyChipEnabled == true or _G.AutoBuyChip == true then
+        or _G.AutoLawRaid == true then
+        -- Chỉ tính là "raid" khi raid thật sự đang chạy; công tắc bật nhưng đang chờ
+        -- không được chặn Auto Farm / Material / Chest.
         name = "raid"
     elseif _G.FruitPickupBusy == true then
         name = "fruit"
     elseif _G.PirateRaidBusy == true then
         name = "pirate"
-    elseif _G.EliteBusy == true or _G.EliteHunter == true then
+    elseif _G.EliteBusy == true then
         name = "elite"
     elseif _G.TyrantFarm == true or _G.TyrantSummon == true then
         name = "tyrant"
@@ -8132,62 +8137,28 @@ do
 end
 
 -- NOCLIP LOGIC
--- Lưu đúng trạng thái va chạm ban đầu và KHÔI PHỤC khi không còn tác vụ di chuyển.
--- Bản cũ chỉ đặt CanCollide=false mà không có nhánh restore, khiến nhân vật có thể
--- tiếp tục xuyên sàn sau khi tắt Farm/Raid/di chuyển.
 RunService.Stepped:Connect(function()
-    local nc = Q.NC
-    if not nc then
-        nc = { parts = {}, orig = setmetatable({}, {__mode = "k"}), at = 0, char = nil }
-        Q.NC = nc
-    end
-
-    local active = autoFarmEnabled or autoFarmMaterialEnabled or autoRaidEnabled
-        or _G.Dungeon or _G.AutoLawRaid or _G.AutoUnlockSeaBusy or autoChestEnabled
-        or _G.FruitPickupBusy or _G.PirateRaidBusy or _G.EliteHunter
-        or _G.TyrantFarm or _G.TyrantSummon or (Q.SUB and Q.SUB.force)
-        or (_G.__FlyN or 0) > 0 or _G.BuyMeleeActive == true
-
-    local character = LocalPlayer.Character
-    if active and character then
-        if nc.char and nc.char ~= character then
-            -- Dọn trạng thái của model cũ trước khi chuyển sang nhân vật mới.
-            for part in pairs(nc.orig) do
-                if part and part.Parent then
-                    pcall(function() part.CanCollide = true end)
+    if autoFarmEnabled or autoFarmMaterialEnabled or autoRaidEnabled or _G.Dungeon or _G.AutoLawRaid or _G.AutoUnlockSeaBusy or autoChestEnabled or _G.FruitPickupBusy or _G.PirateRaidBusy or _G.EliteHunter or _G.TyrantFarm or _G.TyrantSummon or (Q.SUB and Q.SUB.force) or (_G.__FlyN or 0) > 0 or _G.BuyMeleeActive == true then
+        local character = LocalPlayer.Character
+        if character then
+            local nc = Q.NC
+            if not nc then nc = { parts = {}, at = 0 }; Q.NC = nc end
+            -- chỉ quét lại danh sách part mỗi 0.75s (trước đây quét mỗi khung hình -> giật)
+            if nc.char ~= character or tick() - nc.at > 0.75 then
+                nc.char, nc.at, nc.parts = character, tick(), {}
+                for _, part in ipairs(character:GetDescendants()) do
+                    if part:IsA("BasePart") then nc.parts[#nc.parts + 1] = part end
                 end
             end
-            table.clear(nc.orig)
-        end
-        if nc.char ~= character or tick() - nc.at > 0.75 then
-            nc.char, nc.at, nc.parts = character, tick(), {}
-            for _, part in ipairs(character:GetDescendants()) do
-                if part:IsA("BasePart") then
-                    nc.parts[#nc.parts + 1] = part
-                end
+            for _, part in ipairs(nc.parts) do
+                if part.Parent and part.CanCollide then part.CanCollide = false end
+            end
+            local root = character:FindFirstChild("HumanoidRootPart")
+            if root then
+                root.AssemblyLinearVelocity = Vector3.zero
+                root.AssemblyAngularVelocity = Vector3.zero
             end
         end
-
-        for _, part in ipairs(nc.parts) do
-            if part.Parent and part.CanCollide then
-                nc.orig[part] = true
-                part.CanCollide = false
-            end
-        end
-
-        local root = character:FindFirstChild("HumanoidRootPart")
-        if root then
-            root.AssemblyLinearVelocity = Vector3.zero
-            root.AssemblyAngularVelocity = Vector3.zero
-        end
-    elseif next(nc.orig) then
-        for part in pairs(nc.orig) do
-            if part and part.Parent then
-                pcall(function() part.CanCollide = true end)
-            end
-        end
-        table.clear(nc.orig)
-        nc.parts, nc.char, nc.at = {}, nil, 0
     end
 end)
 
@@ -13252,7 +13223,14 @@ _G.MHSpawn(function()
             -- Không được để vòng lặp này hủy Tween bay tới cổng Underwater City mỗi 0.05 giây.
             -- Chỉ dọn Tween khi không có thao tác mua võ độc lập đang chạy.
             if not autoFarmMaterialEnabled and not autoRaidEnabled and not _G.Dungeon
-                and not _G.BuyMeleeActive then
+                and not _G.BuyMeleeActive
+                and not _G.EliteHunter and not _G.EliteBusy
+                and not _G.TyrantFarm and not _G.TyrantSummon
+                and not _G.AutoLawRaid and not _G.PirateRaidBusy
+                and not _G.AutoUnlockSeaBusy and not _G.FruitPickupBusy
+                and not (Q.DK and Q.DK.on) and not (Q.SB and Q.SB.on)
+                and not (Q.MeleeShop and Q.MeleeShop.running)
+                and not RAID_FIXED.running then
                 targetEnemy = nil
                 if currentFlyTween then
                     pcall(function() currentFlyTween:Cancel() end)
@@ -15688,8 +15666,20 @@ _G.MHSpawn(function()
             tyrantFarm = _G.TyrantFarm,
             tyrantSummon = _G.TyrantSummon,
             randomFruit = autoRandomFruitEnabled,
+            startRaid = autoStartRaidEnabled,
+            buyChip = autoBuyChipEnabled,
+            gStartRaid = _G.StartRaid,
+            gBuyChip = _G.AutoBuyChip,
+            law = _G.AutoLawRaid,
+            unlockSea = _G.AutoUnlockSea,
         }
 
+        autoStartRaidEnabled = false
+        autoBuyChipEnabled = false
+        _G.StartRaid = false
+        _G.AutoBuyChip = false
+        _G.AutoLawRaid = false
+        _G.AutoUnlockSea = false
         autoFarmEnabled = false
         autoFarmMaterialEnabled = false
         autoRaidEnabled = false
@@ -15722,6 +15712,12 @@ _G.MHSpawn(function()
         _G.TyrantFarm = saved.tyrantFarm
         _G.TyrantSummon = saved.tyrantSummon
         autoRandomFruitEnabled = saved.randomFruit
+        autoStartRaidEnabled = saved.startRaid
+        autoBuyChipEnabled = saved.buyChip
+        _G.StartRaid = saved.gStartRaid
+        _G.AutoBuyChip = saved.gBuyChip
+        _G.AutoLawRaid = saved.law
+        _G.AutoUnlockSea = saved.unlockSea
 
         local toggles = {
             {"AutoFarmTargetToggle", saved.farm},
