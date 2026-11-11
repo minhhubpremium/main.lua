@@ -16158,6 +16158,76 @@ _G.MHSpawn(function()
 end)
 
 
+-- MINH HUB PREMIUM: NEON BORDER PASS
+-- Bổ sung viền tím đồng bộ cho khung menu, tab, thẻ chức năng và các nút lớn.
+task.defer(function()
+    pcall(function()
+        local borderColor = Color3.fromRGB(164, 112, 255)
+        local softBorder = Color3.fromRGB(104, 75, 165)
+
+        local function ensureBorder(guiObject, color, thickness, transparency)
+            if not guiObject or not guiObject.Parent then return end
+            if guiObject:FindFirstChildOfClass("UIStroke") then return end
+            local stroke = Instance.new("UIStroke")
+            stroke.Name = "MinhHubNeonBorder"
+            stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+            stroke.Color = color or softBorder
+            stroke.Thickness = thickness or 1
+            stroke.Transparency = transparency or 0.28
+            stroke.LineJoinMode = Enum.LineJoinMode.Round
+            stroke.Parent = guiObject
+        end
+
+        -- Viền ngoài kép tạo cảm giác menu có khung rõ ràng.
+        ensureBorder(mainFrame, borderColor, 2.2, 0.04)
+        local outerGlow = Instance.new("UIStroke")
+        outerGlow.Name = "MinhHubOuterGlowBorder"
+        outerGlow.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+        outerGlow.Color = Color3.fromRGB(112, 65, 220)
+        outerGlow.Thickness = 5
+        outerGlow.Transparency = 0.72
+        outerGlow.LineJoinMode = Enum.LineJoinMode.Round
+        outerGlow.Parent = mainFrame
+
+        ensureBorder(header, borderColor, 1.15, 0.18)
+        ensureBorder(sidebar, softBorder, 1.15, 0.2)
+        ensureBorder(pagesFolder, softBorder, 1, 0.5)
+        ensureBorder(toggleBtn, borderColor, 2, 0.08)
+
+        for _, obj in ipairs(screenGui:GetDescendants()) do
+            if obj:IsA("GuiObject") then
+                local n = string.lower(obj.Name or "")
+                local skip = n:find("tech", 1, true)
+                    or n:find("scan", 1, true)
+                    or n:find("bracket", 1, true)
+                    or n:find("indicator", 1, true)
+                    or n:find("slidertrack", 1, true)
+                    or n:find("sliderfill", 1, true)
+                    or n:find("progressfill", 1, true)
+                    or n:find("checkboxfill", 1, true)
+                if not skip and obj ~= mainFrame and obj ~= header and obj ~= sidebar
+                    and obj ~= pagesFolder and obj ~= toggleBtn then
+                    local isPanel = n:find("card", 1, true)
+                        or n:find("dropdown", 1, true)
+                        or n:find("panel", 1, true)
+                        or n:find("section", 1, true)
+                        or n:find("container", 1, true)
+                        or n:find("page", 1, true)
+                    local isTabButton = obj:IsA("TextButton") and obj.Parent == sidebar
+                    local isLargeButton = obj:IsA("TextButton") and obj.AbsoluteSize.X >= 100
+                    if (obj:IsA("Frame") or obj:IsA("ScrollingFrame")) and isPanel then
+                        ensureBorder(obj, softBorder, 1.05, 0.24)
+                    elseif isTabButton then
+                        ensureBorder(obj, borderColor, 1.05, 0.3)
+                    elseif isLargeButton then
+                        ensureBorder(obj, softBorder, 0.9, 0.42)
+                    end
+                end
+            end
+        end
+    end)
+end)
+
 -- MENU SAFETY: đảm bảo ScreenGui không bị tắt/ẩn sau khi thêm module Shop.
 task.defer(function()
     pcall(function()
