@@ -405,7 +405,7 @@ _G.AutoLawRaid  = false
 _G.AutoPickupFruit        = false
 _G.FruitPickupBusy        = false     -- true khi đang bay đi nhặt (các vòng farm khác tạm dừng)
 _G.FruitPickupDebug       = true      -- in log nhặt trái ra console
-_G.FruitFlySpeed          = 300       -- tốc độ bay thẳng tới trái (studs/giây)
+_G.FruitFlySpeed          = 190       -- tốc độ bay trái dùng chung (studs/giây)
 _G.FruitPickupMaxDistance = math.huge -- chỉ nhặt trái trong bán kính này (studs); mặc định: cả map
 
 -- CẤU HÌNH AUTO FARM PIRATE RAID (hải tặc tấn công Castle on the Sea - chỉ có ở Sea 3)
@@ -413,7 +413,7 @@ _G.PirateRaidFarm      = false
 _G.PirateRaidBusy      = false   -- true khi đang đánh hải tặc (các vòng farm khác tạm dừng)
 _G.PirateRaidStatus    = "Disabled"
 _G.PirateRaidRadius    = 900     -- bán kính (studs) quanh Castle on the Sea tính là quái của Pirate Raid
-_G.PirateRaidSpeed     = 300     -- tốc độ bay thẳng tới hải tặc (studs/giây)
+_G.PirateRaidSpeed     = 190     -- tốc độ bay chung 190 studs/giây
 _G.PirateRaidAutoTravel = true   -- nghe thông báo "Pirates have been spotted..." rồi bay sẵn tới lâu đài
 _G.PirateRaidDebug     = true
 _G.MinhHubThirdSeaPortalStatus = "Chưa quét portal Sea 3" -- cập nhật trạng thái mở/khóa khi các chức năng cần di chuyển
@@ -427,7 +427,7 @@ local autoStartRaidEnabled  = false
 local selectedRaidChip      = "Flame"
 
 local farmDistanceHeight    = 20
-local flySpeed              = 190 -- tốc độ bay mặc định 190 studs/giây
+local flySpeed              = 190 -- tốc độ bay chung 190 studs/giây cho các tác vụ di chuyển
 local bringRadius           = 250
 local selectedWeapon        = "Melee"
 local weaponTypes           = {"Melee", "Sword", "Blox Fruit", "Gun"}
@@ -458,7 +458,7 @@ local function flyTo(targetCFrame, speed, keepGoing)
     local character = LocalPlayer.Character
     if not character or not character:FindFirstChild("HumanoidRootPart") then return end
     local hrp      = character.HumanoidRootPart
-    local spd      = speed or flySpeed or 190
+    local spd      = 190 -- tốc độ bay chuẩn áp dụng chung cho mọi chuyến bay qua flyTo
     local distance = (hrp.Position - targetCFrame.Position).Magnitude
 
     cancelFarmTween() -- tránh 2 tween tranh nhau điều khiển nhân vật
@@ -951,14 +951,14 @@ end
 
 -- Trả về true nếu còn đang bay tới / chờ dịch chuyển ở điểm thoát (vòng farm nên chờ), false khi xong/bỏ cuộc.
 -- Thoát đảo dưới nước phải NHANH: tốc độ cao, chờ cổng ngắn, spam requestEntrance sớm.
-Q.EXIT_FLY_SPEED = 520          -- studs/s khi bay tới vòng xoáy thoát (không dùng flySpeed 190 chậm)
+Q.EXIT_FLY_SPEED = 190          -- tốc độ bay chung 190 studs/giây
 Q.EXIT_PORTAL_WAIT = 1.2        -- chỉ đứng chờ ngắn rồi gọi requestEntrance (không dùng PORTAL_WAIT 6s)
 
 function Q.flyToUnderwaterExit(hrp)
     local ex = Q.UNDERWATER_EXIT
     local exitCF = CFrame.new(ex + Vector3.new(0, 2, 0))
     local dist = (hrp.Position - ex).Magnitude
-    local exitSpeed = math.clamp(tonumber(Q.EXIT_FLY_SPEED) or 520, 300, 700)
+    local exitSpeed = 190
     local waitGate = math.clamp(tonumber(Q.EXIT_PORTAL_WAIT) or 1.2, 0.4, 6)
 
     if dist > 12 then
@@ -1860,7 +1860,7 @@ function Q.ThirdSeaPortals.tp3MoveRootTo(targetPos, speed, active)
     local started = tick()
     local root = Q.ThirdSeaPortals.tp3GetRoot(nil)
     if not root then return false end
-    local spd = math.clamp(tonumber(speed) or 190, 70, 360)
+    local spd = 190
     while tick() - started < 85 do
         if active and not active() then return false end
         root = Q.ThirdSeaPortals.tp3GetRoot(root)
@@ -2116,7 +2116,7 @@ function Q.enterIfNeeded(hrp, pos, sourceKey, targetName)
                     transit.phase = "flying-to-graveyard-gate"
                     Q.qlog("Sea 2 Level 1250+: đang bay tới cổng Thuyền Ma ở Graveyard", graveyardExitAnchor)
                     local okFly, flyErr = pcall(function()
-                        flyTo(CFrame.new(graveyardExitAnchor + Vector3.new(0, 5, 0)), math.max(flySpeed or 190, 220), function()
+                        flyTo(CFrame.new(graveyardExitAnchor + Vector3.new(0, 5, 0)), 190, function()
                             local currentChar = LocalPlayer.Character
                             local currentRoot = currentChar and currentChar:FindFirstChild("HumanoidRootPart")
                             return currentRoot ~= nil and (
@@ -2165,7 +2165,7 @@ function Q.enterIfNeeded(hrp, pos, sourceKey, targetName)
                     transit.phase = "flying-to-ship-exit"
                     Q.qlog("Thuyền Ma: đang bay tới cửa thoát", shipExitAnchor)
                     local okFly, flyErr = pcall(function()
-                        flyTo(CFrame.new(shipExitAnchor), math.max(flySpeed or 190, 220), function()
+                        flyTo(CFrame.new(shipExitAnchor), 190, function()
                             local currentRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
                             return currentRoot ~= nil and (
                                 autoFarmEnabled
@@ -2343,7 +2343,7 @@ function Q.enterIfNeeded(hrp, pos, sourceKey, targetName)
         local aboveWorker = CFrame.new(workerPos + Vector3.new(0, 60, 0))
         if (root.Position - aboveWorker.Position).Magnitude > 12 then
             local okFly, flyErr = pcall(function()
-                flyTo(aboveWorker, 300, canContinueSubmergedTravel)
+                flyTo(aboveWorker, 190, canContinueSubmergedTravel)
             end)
             if not okFly then Q.qlog("Submerged: lỗi bay tới phía trên NPC: " .. tostring(flyErr)) end
             task.wait(0.15)
@@ -2364,7 +2364,7 @@ function Q.enterIfNeeded(hrp, pos, sourceKey, targetName)
         local nearWorker = CFrame.new(workerPos + Vector3.new(0, 3, 0))
         if (root.Position - nearWorker.Position).Magnitude > 10 then
             local okFly, flyErr = pcall(function()
-                flyTo(nearWorker, 300, canContinueSubmergedTravel)
+                flyTo(nearWorker, 190, canContinueSubmergedTravel)
             end)
             if not okFly then Q.qlog("Submerged: lỗi bay áp sát NPC: " .. tostring(flyErr)) end
             task.wait(0.15)
@@ -2876,12 +2876,27 @@ local function claimQuestCore(questName, questLevel, mobName, questNpcPos)
 
     if (hrp.Position - questNpcPos).Magnitude > 30 then
         Q.qlog("Cần nhận quest mới -> bay tới NPC:", questName, questLevel)
-        flyTo(CFrame.new(questNpcPos + Vector3.new(0, 5, 0)))
-        if not autoFarmEnabled then return false end
+        flyTo(CFrame.new(questNpcPos + Vector3.new(0, 5, 0)), 190, function()
+            local active = autoFarmEnabled or selectedFarmTarget == "Bones" or selectedFarmTarget == "Cake Prince"
+            return active and autoQuestEnabled
+        end)
+        if not autoQuestEnabled then return false end
         hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
         if not hrp then return false end
+        -- Không gửi StartQuest khi tween bị ngắt hoặc chưa tới đúng NPC.
+        if (hrp.Position - questNpcPos).Magnitude > 35 then
+            Q.qlog("Chưa tới NPC quest; giữ trạng thái chờ và thử lại ở vòng sau")
+            return false
+        end
         if HasQuest() then Q.lastQuestSeen = tick(); return true end
     end
+
+    if not autoQuestEnabled then return false end
+    if not (autoFarmEnabled or selectedFarmTarget == "Bones" or selectedFarmTarget == "Cake Prince") then
+        return false
+    end
+    -- Chặn gọi remote nếu nhân vật đã bị tác vụ khác kéo khỏi NPC.
+    if (hrp.Position - questNpcPos).Magnitude > 35 then return false end
 
     Q.lastQuestAttempt = tick()
     Q.questAttempts += 1
@@ -2976,12 +2991,12 @@ end
 
 -- UI HELPERS & THEME CONFIG (BANANA CAT-INSPIRED MINH HUB STYLE)
 -- Banana Cat-inspired palette: matte charcoal panels with warm banana-gold accents.
-local BANANA_YELLOW       = Color3.fromRGB(239, 193, 66)
-local BANANA_DARK         = Color3.fromRGB(105, 82, 35)
-local BANANA_BG           = Color3.fromRGB(18, 18, 20)
-local BANANA_SIDEBAR      = Color3.fromRGB(13, 13, 15)
-local BANANA_CARD         = Color3.fromRGB(31, 31, 35)
-local BANANA_CARD_BORDER  = Color3.fromRGB(58, 54, 45)
+local BANANA_YELLOW       = Color3.fromRGB(155, 105, 255)
+local BANANA_DARK         = Color3.fromRGB(45, 35, 85)
+local BANANA_BG           = Color3.fromRGB(13, 12, 24)
+local BANANA_SIDEBAR      = Color3.fromRGB(20, 15, 38)
+local BANANA_CARD         = Color3.fromRGB(28, 23, 48)
+local BANANA_CARD_BORDER  = Color3.fromRGB(92, 67, 145)
 local BANANA_TEXT_ON      = Color3.fromRGB(255, 255, 255)
 
 local function addCorner(parent, radius)
@@ -3047,7 +3062,7 @@ do
     local bananaIcon = Instance.new("TextLabel")
     bananaIcon.Size = UDim2.new(1, 0, 1, 0)
     bananaIcon.BackgroundTransparency = 1
-    bananaIcon.Text = "🍌"
+    bananaIcon.Text = "M"
     bananaIcon.TextColor3 = BANANA_YELLOW
     bananaIcon.TextSize = 26
     bananaIcon.Font = Enum.Font.GothamBlack
@@ -3161,7 +3176,7 @@ local headerTitle = Instance.new("TextLabel")
 headerTitle.Size = UDim2.new(1, -90, 1, 0)
 headerTitle.Position = UDim2.new(0, 42, 0, 0)
 headerTitle.BackgroundTransparency = 1
-headerTitle.Text = "<font color=\"#EFC142\">Banana Cat Hub</font>  V2- Blox Fruit"
+headerTitle.Text = "<font color=\"#A879FF\">MINH HUB PREMIUM</font>  |  BLOX FRUITS"
 headerTitle.RichText = true
 headerTitle.TextColor3 = Color3.fromRGB(235, 237, 245)
 headerTitle.TextSize = 14
@@ -3174,7 +3189,7 @@ headerBanana.Name = "BananaCatLogo"
 headerBanana.Size = UDim2.fromOffset(28, 26)
 headerBanana.Position = UDim2.fromOffset(6, 2)
 headerBanana.BackgroundTransparency = 1
-headerBanana.Text = "🍌"
+headerBanana.Text = "M"
 headerBanana.TextSize = 18
 headerBanana.Font = Enum.Font.GothamBold
 headerBanana.Parent = header
@@ -4534,7 +4549,12 @@ end)()
 createToggleFeature(farmPage, "AutoFarmTargetToggle", "Auto Farm", "Automatically farm the selected target", 13, autoFarmEnabled, function(state)
     autoFarmEnabled = state
     if not state then
+        local wasFarmRoute = (targetEnemy == selectedFarmTarget) or (typeof(targetEnemy) == "Instance")
         targetEnemy = nil
+        if wasFarmRoute and currentFlyTween then
+            pcall(function() currentFlyTween:Cancel() end)
+            currentFlyTween = nil
+        end
         if selectedFarmTarget == "Bones" and Q.BonesFarm then Q.BonesFarm.setStatus("Disabled") end
         if selectedFarmTarget == "Cake Prince" then
             Q.cakeNeedSummon = false
@@ -4849,6 +4869,7 @@ createToggleFeature(bossPage, "AutoFarmBossToggle", "Auto Farm Boss", "Automatic
     else
         autoFarmEnabled = false
         targetEnemy = nil
+        if currentFlyTween then pcall(function() currentFlyTween:Cancel() end); currentFlyTween = nil end
         -- Trả lại mục tiêu Auto Farm trước đó để toggle Auto Farm thường không bị kẹt ở "Farm Boss".
         if selectedFarmTarget == "Farm Boss" and Q.prevFarmTarget then
             selectedFarmTarget = Q.prevFarmTarget
@@ -5578,7 +5599,7 @@ local function raidFlyTo(targetCFrame, speed, keepGoing)
     end
 
     -- Raid flight dùng cùng tốc độ Farm (đọc flySpeed tại thời điểm bay).
-    local spd = math.clamp(tonumber(speed or flySpeed) or 190, 60, 350)
+    local spd = 190
 
     setRaidNoclip(true)
     setRaidHold(nil) -- thôi giữ vị trí cũ để không tranh quyền với Tween
@@ -7338,7 +7359,7 @@ local function updateSliderValue(inputX)
     farmDistanceHeight = val
     valueBox.Text = tostring(val)
     sliderFill.Size = UDim2.new(relativeX, 0, 1, 0)
-    if _G.MHRaidHeightUI then pcall(_G.MHRaidHeightUI, val) end   -- đồng bộ thanh trong tab Raid
+
 end
 
 -- Cho thanh trong tab Raid cập nhật hiển thị thanh này
@@ -7373,11 +7394,96 @@ valueBox.FocusLost:Connect(function()
         farmDistanceHeight = num
         valueBox.Text = tostring(num)
         sliderFill.Size = UDim2.new(num / 100, 0, 1, 0)
-        if _G.MHRaidHeightUI then pcall(_G.MHRaidHeightUI, num) end
+
     else
         valueBox.Text = tostring(farmDistanceHeight)
     end
 end)
+
+-- RAID HEIGHT SLIDER (đặt ngay dưới Farm Height, độc lập với độ cao farm thường)
+;(function()
+    RAID_FIXED.lockHeight = math.clamp(tonumber(RAID_FIXED.lockHeight) or 35, 0, 100)
+    local card = Instance.new("Frame")
+    card.Name = "RaidHeightSliderCard"
+    card.Size = UDim2.new(1, 0, 0, 56)
+    card.BackgroundColor3 = BANANA_CARD
+    card.LayoutOrder = 3
+    card.Parent = settingsPage
+    addCorner(card, 8)
+    addStroke(card, BANANA_CARD_BORDER, 1.2)
+
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(0.65, 0, 0, 28)
+    title.Position = UDim2.new(0, 12, 0, 4)
+    title.BackgroundTransparency = 1
+    title.Text = "Raid Height"
+    title.TextColor3 = Color3.fromRGB(225, 210, 255)
+    title.TextSize = 12
+    title.Font = Enum.Font.GothamBold
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.Parent = card
+
+    local box = Instance.new("TextBox")
+    box.Size = UDim2.new(0, 60, 0, 24)
+    box.Position = UDim2.new(1, -70, 0, 6)
+    box.BackgroundColor3 = Color3.fromRGB(18, 14, 32)
+    box.TextColor3 = Color3.fromRGB(255, 255, 255)
+    box.TextSize = 12
+    box.Font = Enum.Font.GothamBold
+    box.Text = tostring(RAID_FIXED.lockHeight)
+    box.ClearTextOnFocus = false
+    box.Parent = card
+    addCorner(box, 6)
+
+    local track = Instance.new("TextButton")
+    track.Size = UDim2.new(1, -24, 0, 8)
+    track.Position = UDim2.new(0, 12, 1, -14)
+    track.BackgroundColor3 = Color3.fromRGB(18, 14, 32)
+    track.BorderSizePixel = 0
+    track.Text = ""
+    track.AutoButtonColor = false
+    track.Parent = card
+    addCorner(track, 4)
+
+    local fill = Instance.new("Frame")
+    fill.Size = UDim2.new(RAID_FIXED.lockHeight / 100, 0, 1, 0)
+    fill.BackgroundColor3 = Color3.fromRGB(155, 105, 255)
+    fill.BorderSizePixel = 0
+    fill.Parent = track
+    addCorner(fill, 4)
+
+    local dragging = false
+    local function setValue(v)
+        v = math.clamp(math.floor(tonumber(v) or 35), 0, 100)
+        RAID_FIXED.lockHeight = v
+        RAID_FIXED.islandHeight = v
+        box.Text = tostring(v)
+        fill.Size = UDim2.new(v / 100, 0, 1, 0)
+    end
+    local function fromX(x)
+        local width = track.AbsoluteSize.X
+        if width <= 0 then return end
+        setValue(((x - track.AbsolutePosition.X) / width) * 100)
+    end
+    track.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            fromX(input.Position.X)
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            fromX(input.Position.X)
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+    box.FocusLost:Connect(function() setValue(box.Text) end)
+    _G.MHRaidHeightUI = setValue
+end)()
 
 createToggleFeature(settingsPage, nil, "Bring Mob", "Gather nearby mobs into one location", 16, bringMobsEnabled, function(state) 
     bringMobsEnabled = state 
@@ -7809,8 +7915,8 @@ end
 createToggleFeature(settingsPage, nil, "Auto Race V3", "Automatically use the Race V3 skill (T key)", 23, autoRaceV3Enabled, function(state) autoRaceV3Enabled = state end)
 createToggleFeature(settingsPage, nil, "Auto Race V4", "Automatically activate Race V4 awakening (Y key)", 24, autoRaceV4Enabled, function(state) autoRaceV4Enabled = state end)
 createToggleFeature(settingsPage, nil, "Anti AFK", "Prevent AFK disconnections automatically", 32, autoAfkEnabled, function(state) autoAfkEnabled = state end)
-createInputFeature(settingsPage, "Fly Speed (60-350)", flySpeed, 3, function(val)
-    flySpeed = math.clamp(math.floor(tonumber(val) or 190), 60, 350)
+createInputFeature(settingsPage, "Fly Speed (LOCKED: 190)", 190, 3, function(val)
+    flySpeed = 190
 end)
 createInputFeature(settingsPage, "Fast Attack Targets", maxAttackTargets, 13, function(val)
     maxAttackTargets = math.clamp(math.floor(tonumber(val) or 2), 1, 6)
@@ -8049,7 +8155,7 @@ do
     toast.Size = UDim2.new(0, 230, 0, 34)
     toast.Position = UDim2.new(0.5, 0, 0, -50)
     toast.BackgroundColor3 = BANANA_BG
-    toast.Text = "Minh Hub - Blox Fruits is ready"
+    toast.Text = "MINH HUB PREMIUM - Blox Fruits is ready"
     toast.TextColor3 = BANANA_YELLOW
     toast.TextSize = 12
     toast.Font = Enum.Font.GothamBold
@@ -8714,6 +8820,8 @@ _G.FlyStraight = function(getTarget, speed, keepGoing, arriveDist)
     local hum  = char and char:FindFirstChildOfClass("Humanoid")
     if not hrp or not hum or hum.Health <= 0 then return false end
 
+    -- Mọi tính năng dùng chung tốc độ bay cố định 190 studs/giây.
+    speed = 190
     -- Auto Pickup Fruit / Pirate Raid also pass through the shared Third Sea portal router.
     if Q and Q.ThirdSeaPortals and not _G.__MHThirdSeaPortalBypass then
         local okTarget, targetPos = pcall(getTarget)
@@ -9160,7 +9268,7 @@ _G.MHSpawn(function()
                 local area = NPC_AREA[seaIndex]
                 if area then
                     setStatus("Chưa thấy NPC - bay tới khu vực Zioles (Sea " .. seaIndex .. ")...")
-                    flyStraight(function() return area + Vector3.new(0, 25, 0) end, math.max(flySpeed or 190, 700), wanted, 12)
+                    flyStraight(function() return area + Vector3.new(0, 25, 0) end, 190, wanted, 12)
                     for _ = 1, 6 do
                         task.wait(0.1)
                         npc = findGachaNPC()
@@ -9180,7 +9288,7 @@ _G.MHSpawn(function()
             local arrived = flyStraight(function()
                 local p = npcPos()
                 return p and (p + Vector3.new(3, 0.5, 0)) or nil
-            end, math.max(flySpeed or 190, 700), wanted, 2.5)
+            end, 190, wanted, 2.5)
             if not wanted() then detail = "Đã tắt"; return end
             if not arrived then detail = "Không bay tới được NPC"; return end
 
@@ -9416,10 +9524,10 @@ _G.MHSpawn(function()
                         if currentFlyTween then pcall(function() currentFlyTween:Cancel() end); currentFlyTween = nil end
                         if currentRaidTween then pcall(function() currentRaidTween:Cancel() end); currentRaidTween = nil end
                         Q.leaveUnderwaterCity(hrp)
-                        -- Không tiếp tục chọn chest/tọa độ khác khi nhân vật vẫn còn trong thành phố dưới nước.
-                        local freshRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                        if freshRoot and Q.inUnderwaterCity(freshRoot) then return end
+                        -- Luôn kết thúc lượt này sau khi xử lý cổng: danh sách rương vừa quét
+                        -- có thể còn chứa rương trong Underwater City, khiến vòng lặp bay ngược vào cổng.
                         noneSince = nil
+                        return
                     else
                         noneSince = nil
                     end
@@ -9518,7 +9626,7 @@ _G.MHSpawn(function()
         return bestObj, bestHandle
     end
 
-    local FLY_SPEED = function() return tonumber(_G.FruitFlySpeed) or 300 end
+    local FLY_SPEED = function() return 190 end
 
     local function pickupFruit(fruit, handle)
         local function stillWanted()
@@ -10797,6 +10905,20 @@ local __bringLast, __simLast = 0, 0
 RunService.Heartbeat:Connect(function(deltaTime)
     if RAID_FIXED.killAuraActive then return end
     if not bringMobsEnabled or not targetEnemy or type(targetEnemy) ~= "userdata" or not targetEnemy:FindFirstChild("HumanoidRootPart") then return end
+    -- Fruit M1/skills có vùng va chạm riêng; kéo/đóng băng mob bằng Bring Mob làm
+    -- quái bị bật lên cao hoặc lệch khỏi điểm aim. Khi chọn Blox Fruit, bỏ gom vật lý.
+    if selectedWeapon == "Blox Fruit" then
+        local folder = workspace:FindFirstChild("Enemies")
+        if folder then
+            for _, mob in ipairs(folder:GetChildren()) do
+                local h = mob:FindFirstChildOfClass("Humanoid")
+                if h and h.Health > 0 and h.PlatformStand then
+                    pcall(function() h.PlatformStand = false end)
+                end
+            end
+        end
+        return
+    end
     local __now = os.clock()
     -- Không quét và cập nhật physics quái ở mọi frame: giảm tải khi farm bằng Melee/Sword.
     if __now - __bringLast < 0.075 then return end
@@ -10876,7 +10998,7 @@ resolveCombatRemotes(true)
 -- Có thể giảm/tăng tùy ping/server.
 -- 0.025 = tối đa khoảng 40 chu kỳ/giây về phía client,
 -- nhưng server vẫn có thể giới hạn tốc độ thực tế.
-local attackInterval = 0.12  -- khoảng 8 lượt/giây; giảm spam remote/giật màn hình khi dùng Melee hoặc Sword
+local attackInterval = 0.07  -- khoảng 14 lượt/giây; nhịp nhanh hơn nhưng vẫn có giới hạn để tránh spam remote
 local attackRadius   = 90    -- giữ tầm đánh hợp lý, giảm lượng mục tiêu phải quét
 local lastAttackTime = 0
 
@@ -11337,7 +11459,11 @@ end
 -- Cách làm: bọc FA.hoverH() cộng thêm độ cao; mọi chế độ farm đang dùng FA.hoverH() (Auto Farm, Boss, Elite, Law Raid...)
 -- đều tự hưởng. Chỉnh được bằng _G.DodgeExtraHeight (mặc định 45) và _G.DodgeSeconds (mặc định 1.2).
 ;(function()
-    local DG = { until_ = 0, low = false, lastHp = nil, status = "off" }
+    local DG = {
+        until_ = 0, low = false, lastHp = nil, status = "off",
+        offset = Vector3.zero, nextDirection = 0, attacker = nil,
+        lastDirectionAt = 0
+    }
     _G.MHDodge = DG
     local ACTION = {
         [Enum.AnimationPriority.Action] = true,
@@ -11359,10 +11485,56 @@ end
         return h
     end
 
-    local function trigger(sec, why)
-        local t = tick() + (sec or tonumber(_G.DodgeSeconds) or 1.2)
+    -- Offset được cộng vào điểm hover gốc, không ghi đè tọa độ farm.
+    -- Nhờ vậy các hệ thống Auto Farm/Boss/Elite/Raid đều dùng chung hướng né.
+    local origHoverSet = FA.hoverSet
+    FA.hoverSet = function(hrp, pos)
+        if _G.AutoDodge and tick() < DG.until_ and typeof(DG.offset) == "Vector3" then
+            pos = pos + DG.offset
+        end
+        return origHoverSet(hrp, pos)
+    end
+
+    local function chooseDodgeOffset(hrp, attacker)
+        local away = Vector3.new(0, 0, 1)
+        local enemyRoot = attacker and attacker:FindFirstChild("HumanoidRootPart")
+        if enemyRoot then
+            local delta = hrp.Position - enemyRoot.Position
+            local flat = Vector3.new(delta.X, 0, delta.Z)
+            if flat.Magnitude > 0.1 then away = flat.Unit end
+        end
+
+        -- Luân phiên né: lùi, chéo trái/phải, ngang trái/phải,
+        -- chéo trước/sau và nhấc cao; tránh chỉ đứng yên một trục.
+        local right = Vector3.new(-away.Z, 0, away.X)
+        local choices = {
+            away,
+            (away + right * 0.85).Unit,
+            (away - right * 0.85).Unit,
+            right,
+            -right,
+            (away * 0.55 + right).Unit,
+            (away * 0.55 - right).Unit,
+            -away,
+        }
+        DG.nextDirection = (DG.nextDirection % #choices) + 1
+        local horizontal = choices[DG.nextDirection] * 16
+        local vertical = (DG.nextDirection % 3 == 0) and 22 or 12
+        DG.offset = horizontal + Vector3.new(0, vertical, 0)
+        DG.attacker = attacker
+        DG.lastDirectionAt = tick()
+    end
+
+    local function trigger(sec, why, hrp, attacker)
+        local now = tick()
+        local t = now + (sec or tonumber(_G.DodgeSeconds) or 1.2)
         if t > DG.until_ then DG.until_ = t end
         DG.status = why
+        -- Không đổi hướng liên tục theo từng frame; chỉ đổi khi bắt đầu đợt né mới
+        -- hoặc khi có kẻ tấn công khác áp sát.
+        if hrp and (now - (DG.lastDirectionAt or 0) > 0.55 or (attacker and attacker ~= DG.attacker)) then
+            chooseDodgeOffset(hrp, attacker)
+        end
     end
 
     -- quái / boss gần đó đang tung chiêu?
@@ -11375,6 +11547,14 @@ end
             if mh and (mh.Position - hrp.Position).Magnitude <= 60 then
                 local hum = m:FindFirstChildOfClass("Humanoid")
                 if hum and hum.Health > 0 then
+                    -- Chuyển động lao nhanh về phía người chơi cũng là tín hiệu né,
+                    -- kể cả khi skill không phát animation Action trên client.
+                    local velocity = mh.AssemblyLinearVelocity
+                    local toward = (hrp.Position - mh.Position)
+                    if toward.Magnitude > 1 and velocity.Magnitude > 42
+                        and velocity.Unit:Dot(toward.Unit) > 0.35 then
+                        return true, m
+                    end
                     local animator = hum:FindFirstChildOfClass("Animator")
                     if animator then
                         for _, tr in ipairs(animator:GetPlayingAnimationTracks()) do
@@ -11407,24 +11587,37 @@ end
                     if frac < 0.30 then DG.low = true elseif frac > 0.55 then DG.low = false end
                     -- mất máu đột ngột
                     if DG.lastHp and (DG.lastHp - hum.Health) >= hum.MaxHealth * 0.04 then
-                        trigger(nil, "bị đánh trúng -> né")
+                        local nearest
+                        local ef = workspace:FindFirstChild("Enemies")
+                        local best = 70
+                        if ef then
+                            for _, mob in ipairs(ef:GetChildren()) do
+                                local root = mob:FindFirstChild("HumanoidRootPart")
+                                local mh = mob:FindFirstChildOfClass("Humanoid")
+                                if root and mh and mh.Health > 0 then
+                                    local dist = (root.Position - hrp.Position).Magnitude
+                                    if dist < best then best = dist; nearest = mob end
+                                end
+                            end
+                        end
+                        trigger(nil, "bị đánh trúng -> né đa hướng", hrp, nearest)
                     end
                     DG.lastHp = hum.Health
                     -- quái đang ra chiêu
                     local atk, who = enemyAttacking(hrp)
                     if atk then
-                        trigger(0.8, "né chiêu " .. tostring(who and who.Name or "?"))
-                        -- Cập nhật lại điểm hover ngay trong lượt này; tránh chỉ đổi độ cao trên biến mà nhân vật chưa di chuyển.
+                        trigger(0.95, "né đa hướng chiêu " .. tostring(who and who.Name or "quái/boss"), hrp, who)
+                        -- Áp dụng ngay offset đã chọn; các vòng hover tiếp theo vẫn giữ offset
+                        -- cho đến hết thời gian né, không chỉ né lên một hướng duy nhất.
                         if targetEnemy and targetEnemy.Parent then
-                            local lift = math.clamp(tonumber(_G.DodgeExtraHeight) or 45, 20, 120)
-                            -- Né theo trục đứng tại vị trí hiện tại; không đặt CFrame theo tọa độ quái.
-                            FA.hoverSet(hrp, hrp.Position + Vector3.new(0, lift, 0))
+                            FA.hoverSet(hrp, hrp.Position)
                         end
                     end
                     if DG.low then DG.status = "máu thấp - đứng cao chờ hồi" end
                 end)
             else
                 DG.low = false; DG.until_ = 0; DG.lastHp = nil
+                DG.offset = Vector3.zero; DG.attacker = nil
             end
         end
     end)
@@ -11432,7 +11625,10 @@ end
     createToggleFeature(settingsPage, "AutoDodgeToggle", "Auto Dodge (Mob / Boss)",
         "Rise out of range when a mob/boss attacks, when you take damage, or when HP is low", 14, false, function(state)
         _G.AutoDodge = state
-        if not state then DG.low = false; DG.until_ = 0 end
+        if not state then
+            DG.low = false; DG.until_ = 0
+            DG.offset = Vector3.zero; DG.attacker = nil
+        end
     end)
 end)()
 
@@ -11771,7 +11967,7 @@ _G.MHSpawn(function()
                                         if not root or not liveHum or liveHum.Health <= 0 then return nil end
                                         return root.Position + Vector3.new(0, h, 0)
                                     end,
-                                    math.max(tonumber(flySpeed) or 190, 220),
+                                    190,
                                     function()
                                         return _G.EliteHunter
                                             and boss.Parent ~= nil
@@ -12395,7 +12591,7 @@ end)
                         -- bay THẲNG tới trên đầu mục tiêu
                         _G.FlyStraight(function()
                             return (best.hrp.Parent and best.hum.Health > 0) and above() or nil
-                        end, tonumber(_G.PirateRaidSpeed) or 300, function()
+                        end, 190, function()
                             return wanted() and best.hum.Health > 0
                         end, 25)
                     else
@@ -12432,7 +12628,7 @@ end)
                     if (hrp.Position - dest).Magnitude > 150 then
                         _G.PirateRaidBusy = true
                         setStatus("✈️ Pirate Raid sắp bắt đầu - đang bay tới Castle on the Sea...")
-                        _G.FlyStraight(function() return dest end, tonumber(_G.PirateRaidSpeed) or 300, function()
+                        _G.FlyStraight(function() return dest end, 190, function()
                             return wanted() and tick() < armedUntil and #pirates(center) == 0
                         end, 40)
                         _G.PirateRaidBusy = false
@@ -12508,6 +12704,13 @@ _G.MHSpawn(function()
                 end
                 -- Không farm được (chưa chọn / material không có ở Sea này) -> chỉ thông báo, không bay lung tung
                 if not MatFarm.getMobSet() then return end
+
+                if selectedFarmTarget == "Cake Prince" and tick() < (Q.cakeNextRunAt or 0) then
+                    targetEnemy = nil
+                    if currentFlyTween then pcall(function() currentFlyTween:Cancel() end); currentFlyTween = nil end
+                    cakeStatusText.Text = "⏳ Cake Prince: chờ 10 giây trước lượt farm tiếp theo..."
+                    return
+                end
 
                 equipSelectedWeapon()
                 local character = LocalPlayer.Character
@@ -12938,6 +13141,7 @@ _G.MHSpawn(function()
                             Q.cakeLastBossPos = nil
                             -- Boss thật sự đã chết: chặn gửi lệnh mở cổng ngay lập tức (đợi đủ điều kiện mới).
                             Q.cakeSummonBlockUntil = tick() + 20
+                            Q.cakeNextRunAt = tick() + 10 -- chờ 10 giây sau khi hạ boss Cake Prince
                         elseif not isCakePrinceReady and cakePortalEntryAt > 0 and not Q.cakePortalTransitioned then
                             cakePortalEntryAt = 0   -- cổng đóng: lần sau vào cổng lại từ đầu
                             Q.cakeTry = 0
@@ -13323,7 +13527,7 @@ function Q.DK.talk(npc, words, stopFn, maxSec)
 
     if (root.Position - pos).Magnitude > 12 then
         pcall(function()
-            flyTo(CFrame.new(pos + Vector3.new(0, 3, 0)), math.max(flySpeed, 220), function()
+            flyTo(CFrame.new(pos + Vector3.new(0, 3, 0)), 190, function()
                 return Q.DK.on and LocalPlayer.Character ~= nil
             end)
         end)
@@ -13372,7 +13576,7 @@ function Q.DK.craftSweetChalice()
         local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
         if root then
             pcall(function()
-                flyTo(CFrame.new(Vector3.new(233.22, 60, -12201.23)), math.max(flySpeed, 220), function() return Q.DK.on end)
+                flyTo(CFrame.new(Vector3.new(233.22, 60, -12201.23)), 190, function() return Q.DK.on end)
             end)
         end
         task.wait(1)
@@ -13402,7 +13606,7 @@ function Q.DK.summon()
         local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
         if root then
             pcall(function()
-                flyTo(CFrame.new(CAKE_PRINCE_GATE_POS + Vector3.new(0, 20, 0)), math.max(flySpeed, 220), function() return Q.DK.on end)
+                flyTo(CFrame.new(CAKE_PRINCE_GATE_POS + Vector3.new(0, 20, 0)), 190, function() return Q.DK.on end)
             end)
         end
         task.wait(1)
@@ -13601,7 +13805,7 @@ function Q.SB.fly(pos, sp)
     if typeof(pos) == "CFrame" then pos = pos.Position end
     if (root.Position - pos).Magnitude <= 8 then return true end
     pcall(function()
-        flyTo(CFrame.new(pos), math.max(flySpeed or 190, sp or 220), function()
+        flyTo(CFrame.new(pos), 190, function()
             return Q.SB.on and LocalPlayer.Character ~= nil
         end)
     end)
@@ -14859,9 +15063,28 @@ do
                         for _, k in ipairs(G.keys) do if cfg[G.name][k] then anyOn = true end end
                     end
                     if not anyOn then stLbl.Text = "Status: no key selected (open a dropdown and tick Z/X/C...)"; return end
-                    local hasTarget = (targetEnemy ~= nil and targetEnemy ~= false)
-                    if typeof(targetEnemy) == "Instance" and not targetEnemy.Parent then hasTarget = false end
-                    if not hasTarget then stLbl.Text = "Status: no farm target (turn on Auto Farm first)"; return end
+                    local skillTarget = nil
+                    if typeof(targetEnemy) == "Instance" and targetEnemy:IsA("Model") and targetEnemy.Parent then
+                        local th = targetEnemy:FindFirstChildOfClass("Humanoid")
+                        local tr = targetEnemy:FindFirstChild("HumanoidRootPart")
+                        if th and th.Health > 0 and tr then skillTarget = targetEnemy end
+                    end
+                    if not skillTarget then
+                        local folder = workspace:FindFirstChild("Enemies")
+                        local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                        local bestDist = 180
+                        if folder and root then
+                            for _, mob in ipairs(folder:GetChildren()) do
+                                local mh = mob:FindFirstChildOfClass("Humanoid")
+                                local mr = mob:FindFirstChild("HumanoidRootPart")
+                                if mh and mr and mh.Health > 0 then
+                                    local d = (mr.Position - root.Position).Magnitude
+                                    if d < bestDist then bestDist = d; skillTarget = mob end
+                                end
+                            end
+                        end
+                    end
+                    if not skillTarget then stLbl.Text = "Status: no living NPC in skill range"; return end
                     local char = LocalPlayer.Character
                     local tool = char and char:FindFirstChildOfClass("Tool")
                     if not tool then stLbl.Text = "Status: no weapon equipped"; return end
@@ -14877,6 +15100,16 @@ do
                     for _, k in ipairs(keysOn) do
                         if tick() - (cooldown[grp.name .. k] or 0) >= 1.5 then
                             cooldown[grp.name .. k] = tick()
+                            -- Hướng nhân vật về phía NPC trước khi bấm skill để hạn chế
+                            -- kỹ năng bắn lệch khỏi mục tiêu. Không dịch chuyển nhân vật.
+                            local root = char:FindFirstChild("HumanoidRootPart")
+                            local enemyRoot = skillTarget:FindFirstChild("HumanoidRootPart")
+                            if root and enemyRoot then
+                                local lookAt = Vector3.new(enemyRoot.Position.X, root.Position.Y, enemyRoot.Position.Z)
+                                if (lookAt - root.Position).Magnitude > 0.1 then
+                                    root.CFrame = CFrame.lookAt(root.Position, lookAt)
+                                end
+                            end
                             press(k)
                             task.wait(0.15)
                         end
