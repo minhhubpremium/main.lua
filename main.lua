@@ -2989,14 +2989,15 @@ function Q.ClaimCakeQuest()
     return claimQuestCore(questName, questLevel, mobName, questNpcPos)
 end
 
--- UI HELPERS & THEME CONFIG (BANANA CAT-INSPIRED MINH HUB STYLE)
--- Banana Cat-inspired palette: matte charcoal panels with warm banana-gold accents.
-local BANANA_YELLOW       = Color3.fromRGB(155, 105, 255)
-local BANANA_DARK         = Color3.fromRGB(45, 35, 85)
-local BANANA_BG           = Color3.fromRGB(13, 12, 24)
-local BANANA_SIDEBAR      = Color3.fromRGB(20, 15, 38)
-local BANANA_CARD         = Color3.fromRGB(28, 23, 48)
-local BANANA_CARD_BORDER  = Color3.fromRGB(92, 67, 145)
+-- UI HELPERS & THEME CONFIG (MINH HUB PREMIUM - BLACK / ANTIQUE GOLD)
+-- Tông màu theo ảnh tham chiếu: nền đen nâu trong nhẹ, viền vàng đồng mảnh,
+-- điểm nhấn vàng ấm và chữ trắng; tránh neon tím hoặc viền 3D quá dày.
+local BANANA_YELLOW       = Color3.fromRGB(245, 202, 76)  -- vàng ấm
+local BANANA_DARK         = Color3.fromRGB(86, 69, 33)   -- đồng tối
+local BANANA_BG           = Color3.fromRGB(10, 9, 8)     -- nền đen nâu
+local BANANA_SIDEBAR      = Color3.fromRGB(14, 13, 11)   -- sidebar đen
+local BANANA_CARD         = Color3.fromRGB(30, 29, 29)   -- thẻ xám than
+local BANANA_CARD_BORDER  = Color3.fromRGB(112, 94, 54)  -- viền vàng đồng dịu
 local BANANA_TEXT_ON      = Color3.fromRGB(255, 255, 255)
 
 local function addCorner(parent, radius)
@@ -3057,7 +3058,8 @@ toggleBtn.Image = ""
 toggleBtn.ImageColor3 = BANANA_YELLOW
 toggleBtn.Parent = screenGui
 addCorner(toggleBtn, 10)
-addStroke(toggleBtn, BANANA_YELLOW, 1.6)
+local toggleStroke = addStroke(toggleBtn, Color3.fromRGB(163, 134, 69), 1.35)
+toggleStroke.Transparency = 0.12
 do
     local bananaIcon = Instance.new("TextLabel")
     bananaIcon.Size = UDim2.new(1, 0, 1, 0)
@@ -3077,7 +3079,7 @@ mainFrame.Name = "MainFrame"
 mainFrame.Size = UDim2.new(0, MH.W, 0, MH.H)
 mainFrame.Position = UDim2.new(0.5, -MH.W / 2, 0.5, -MH.H / 2)
 mainFrame.BackgroundColor3 = BANANA_BG
-mainFrame.BackgroundTransparency = 0.08
+mainFrame.BackgroundTransparency = 0.13
 mainFrame.BorderSizePixel = 0
 mainFrame.ClipsDescendants = true
 mainFrame.Visible = true
@@ -3094,57 +3096,24 @@ task.delay(15, function()
         end
     end)
 end)
-addCorner(mainFrame, 6)
+addCorner(mainFrame, 8)
 do
-    local winStroke = addStroke(mainFrame, BANANA_DARK, 1.3)
-    winStroke.Transparency = 0.1
-    local winGrad = Instance.new("UIGradient")
-    winGrad.Color = ColorSequence.new(Color3.fromRGB(239, 193, 66), Color3.fromRGB(55, 45, 28))
-    winGrad.Rotation = 45
-    winGrad.Parent = winStroke
+    -- Viền kép vàng đồng mảnh giống ảnh mẫu: kín đáo, không phát sáng neon.
+    local outerStroke = addStroke(mainFrame, Color3.fromRGB(119, 99, 57), 1.35)
+    outerStroke.Transparency = 0.08
 
-    pcall(function()
-    -- Hoạ tiết nền vàng rất nhẹ, giữ bố cục tối giản kiểu Banana Cat Hub
-    local function techRect(x, y, w, h, tr, name)
-        local f = Instance.new("Frame")
-        f.Name = name or "TechDeco"
-        f.Position = UDim2.new(0, x, 0, y)
-        f.Size = UDim2.new(0, w, 0, h)
-        f.BackgroundColor3 = BANANA_YELLOW
-        f.BackgroundTransparency = tr
-        f.BorderSizePixel = 0
-        f.Active = false
-        f.Parent = mainFrame
-        return f
-    end
-    for gx = 0, MH.W, 28 do techRect(gx, 0, 1, MH.H, 0.988, "TechGrid") end
-    for gy = 0, MH.H, 28 do techRect(0, gy, MH.W, 1, 0.988, "TechGrid") end
-    local scan = techRect(0, -50, MH.W, 50, 0.96, "TechScan")
-    do
-        local g = Instance.new("UIGradient")
-        g.Rotation = 90
-        g.Transparency = NumberSequence.new({
-            NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.9, 0.95), NumberSequenceKeypoint.new(1, 0.8)})
-        g.Parent = scan
-    end
-    local function bracket(right, bottom)
-        local x0 = right and (MH.W - 6) or 6
-        local y0 = bottom and (MH.H - 6) or 6
-        techRect(right and x0 - 16 or x0, bottom and y0 - 2 or y0, 16, 2, 0.92, "TechBracket").ZIndex = 5
-        techRect(right and x0 - 2 or x0, bottom and y0 - 16 or y0, 2, 16, 0.92, "TechBracket").ZIndex = 5
-    end
-    bracket(false, true) bracket(true, true)
-    task.spawn(function()
-        local RS = game:GetService("RunService")
-        local t0 = os.clock()
-        while mainFrame.Parent do
-            local t = os.clock() - t0
-            scan.Position = UDim2.new(0, 0, 0, -50 + ((t % 4) / 4) * (MH.H + 50))
-            winGrad.Rotation = 45 + (t * 40) % 360
-            RS.Heartbeat:Wait()
-        end
-    end)
-    end)
+    local innerFrame = Instance.new("Frame")
+    innerFrame.Name = "AntiqueGoldInnerBorder"
+    innerFrame.Position = UDim2.new(0, 4, 0, 4)
+    innerFrame.Size = UDim2.new(1, -8, 1, -8)
+    innerFrame.BackgroundTransparency = 1
+    innerFrame.BorderSizePixel = 0
+    innerFrame.Active = false
+    innerFrame.ZIndex = 100
+    innerFrame.Parent = mainFrame
+    addCorner(innerFrame, 5)
+    local innerStroke = addStroke(innerFrame, Color3.fromRGB(174, 146, 83), 0.8)
+    innerStroke.Transparency = 0.52
 
     local menuScale = Instance.new("UIScale")
     menuScale.Name = "MenuScale"
@@ -3167,7 +3136,7 @@ do
     headLine.Size = UDim2.new(1, 0, 0, 1)
     headLine.Position = UDim2.new(0, 0, 1, -1)
     headLine.BackgroundColor3 = BANANA_YELLOW
-    headLine.BackgroundTransparency = 0.7
+    headLine.BackgroundTransparency = 0.42
     headLine.BorderSizePixel = 0
     headLine.Parent = header
 end
@@ -3176,7 +3145,7 @@ local headerTitle = Instance.new("TextLabel")
 headerTitle.Size = UDim2.new(1, -90, 1, 0)
 headerTitle.Position = UDim2.new(0, 42, 0, 0)
 headerTitle.BackgroundTransparency = 1
-headerTitle.Text = "<font color=\"#A879FF\">MINH HUB PREMIUM</font>  |  BLOX FRUITS"
+headerTitle.Text = "<font color=\"#FFD45A\">MINH HUB PREMIUM</font>  |  BLOX FRUITS"
 headerTitle.RichText = true
 headerTitle.TextColor3 = Color3.fromRGB(235, 237, 245)
 headerTitle.TextSize = 14
@@ -3234,7 +3203,7 @@ do
     sideLine.Size = UDim2.new(0, 1, 1, -MH.HEAD)
     sideLine.Position = UDim2.new(0, MH.SIDE, 0, MH.HEAD)
     sideLine.BackgroundColor3 = BANANA_CARD_BORDER
-    sideLine.BackgroundTransparency = 0.6
+    sideLine.BackgroundTransparency = 0.42
     sideLine.BorderSizePixel = 0
     sideLine.Parent = mainFrame -- KHÔNG đặt trong sidebar: sẽ bị UIListLayout xếp và đẩy hết tab ra ngoài
 end
@@ -4015,7 +3984,7 @@ cakeStatusCard.BackgroundColor3 = BANANA_CARD
 cakeStatusCard.LayoutOrder = 0
 cakeStatusCard.Parent = nil -- Ẩn thẻ trạng thái Cake Prince khỏi giao diện
 addCorner(cakeStatusCard, 8)
-addStroke(cakeStatusCard, Color3.fromRGB(255, 170, 0), 1.2)
+addStroke(cakeStatusCard, BANANA_CARD_BORDER, 1)
 
 local cakeStatusText = Instance.new("TextLabel")
 cakeStatusText.Size = UDim2.new(1, -24, 1, 0)
@@ -7417,7 +7386,7 @@ end)
     title.Position = UDim2.new(0, 12, 0, 4)
     title.BackgroundTransparency = 1
     title.Text = "Raid Height"
-    title.TextColor3 = Color3.fromRGB(225, 210, 255)
+    title.TextColor3 = Color3.fromRGB(245, 220, 160)
     title.TextSize = 12
     title.Font = Enum.Font.GothamBold
     title.TextXAlignment = Enum.TextXAlignment.Left
@@ -7426,7 +7395,7 @@ end)
     local box = Instance.new("TextBox")
     box.Size = UDim2.new(0, 60, 0, 24)
     box.Position = UDim2.new(1, -70, 0, 6)
-    box.BackgroundColor3 = Color3.fromRGB(18, 14, 32)
+    box.BackgroundColor3 = Color3.fromRGB(19, 18, 16)
     box.TextColor3 = Color3.fromRGB(255, 255, 255)
     box.TextSize = 12
     box.Font = Enum.Font.GothamBold
@@ -7438,7 +7407,7 @@ end)
     local track = Instance.new("TextButton")
     track.Size = UDim2.new(1, -24, 0, 8)
     track.Position = UDim2.new(0, 12, 1, -14)
-    track.BackgroundColor3 = Color3.fromRGB(18, 14, 32)
+    track.BackgroundColor3 = Color3.fromRGB(19, 18, 16)
     track.BorderSizePixel = 0
     track.Text = ""
     track.AutoButtonColor = false
@@ -7447,7 +7416,7 @@ end)
 
     local fill = Instance.new("Frame")
     fill.Size = UDim2.new(RAID_FIXED.lockHeight / 100, 0, 1, 0)
-    fill.BackgroundColor3 = Color3.fromRGB(155, 105, 255)
+    fill.BackgroundColor3 = BANANA_YELLOW
     fill.BorderSizePixel = 0
     fill.Parent = track
     addCorner(fill, 4)
@@ -13325,7 +13294,7 @@ function Q.DK.makeUI()
     card.LayoutOrder = 35
     card.Parent = farmPage
     addCorner(card, 8)
-    addStroke(card, Color3.fromRGB(255, 170, 0), 1.2)
+    addStroke(card, BANANA_CARD_BORDER, 1)
     local lbl = Instance.new("TextLabel")
     lbl.Size = UDim2.new(1, -24, 1, 0)
     lbl.Position = UDim2.new(0, 12, 0, 0)
