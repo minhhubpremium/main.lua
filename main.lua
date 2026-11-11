@@ -705,20 +705,26 @@ do
     end
 
     -- Tìm điểm hồi sinh THẬT của quái trong workspace._WorldOrigin.EnemySpawns
-    -- (gần vị trí dự phòng nhất). Trả về nil nếu không tìm thấy.
+    -- Cache theo mobName + vùng gần nearPos để tránh "Pirate"/"Bandit" lấy nhầm đảo khác.
     function GetQuestMobSpawn(mobName, nearPos)
         if not mobName then return nil end
-        local cached = spawnCache[mobName]
-        if cached and tick() - cached.t < 10 then return cached.pos end
-
-        local want = norm(mobName)
         local origin = nearPos
         if not origin then
             local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
             origin = hrp and hrp.Position
         end
+        local cacheKey = tostring(mobName)
+        if origin then
+            cacheKey = cacheKey .. string.format("|%d|%d|%d", math.floor(origin.X / 500), math.floor(origin.Y / 200), math.floor(origin.Z / 500))
+        end
+        local cached = spawnCache[cacheKey]
+        if cached and tick() - cached.t < 8 then return cached.pos end
 
+        local want = norm(mobName)
         local best, bestDist = nil, math.huge
+        -- Có toạ độ khu quái đã biết (nearPos): chỉ nhận điểm hồi sinh trong 1500 studs quanh đó,
+        -- tránh lấy nhầm spawn cùng tên ở đảo khác rồi bay đi (vd. "Pirate" ở Pirate Village lv30).
+        local spawnLimit = nearPos and 1500 or 2500
         local wo = workspace:FindFirstChild("_WorldOrigin")
         local spawns = wo and wo:FindFirstChild("EnemySpawns")
         if spawns then
@@ -735,15 +741,23 @@ do
                         end
                         if pos then
                             local d = origin and (pos - origin).Magnitude or 0
-                            if d < bestDist then best, bestDist = pos, d end
+                            if origin and d > spawnLimit then
+                                -- bỏ qua spawn quá xa khu quái đã biết
+                            elseif d < bestDist then
+                                best, bestDist = pos, d
+                            end
                         end
                     end
                 end
-                if best then break end
+                if best and bestDist <= spawnLimit then break end
             end
         end
 
-        spawnCache[mobName] = {t = tick(), pos = best}
+        if (not best or bestDist > math.max(spawnLimit, 3500)) and nearPos then
+            best = nearPos
+        end
+
+        spawnCache[cacheKey] = {t = tick(), pos = best}
         return best
     end
 end
@@ -943,44 +957,67 @@ function Q.touchUnderwaterExit(hrp, ex)
 end
 
 -- Trả về true nếu còn đang bay tới / chờ dịch chuyển ở điểm thoát (vòng farm nên chờ), false khi xong/bỏ cuộc.
+-- Thoát đảo dưới nước phải NHANH: tốc độ cao, chờ cổng ngắn, spam requestEntrance sớm.
+Q.EXIT_FLY_SPEED = 520          -- studs/s khi bay tới vòng xoáy thoát (không dùng flySpeed 190 chậm)
+Q.EXIT_PORTAL_WAIT = 1.2        -- chỉ đứng chờ ngắn rồi gọi requestEntrance (không dùng PORTAL_WAIT 6s)
+
 function Q.flyToUnderwaterExit(hrp)
     local ex = Q.UNDERWATER_EXIT
+    local exitCF = CFrame.new(ex + Vector3.new(0, 2, 0))
     local dist = (hrp.Position - ex).Magnitude
-    if dist > 15 then
+    local exitSpeed = math.clamp(tonumber(Q.EXIT_FLY_SPEED) or 520, 300, 700)
+    local waitGate = math.clamp(tonumber(Q.EXIT_PORTAL_WAIT) or 1.2, 0.4, 6)
+
+    if dist > 12 then
         Q.exitNearAt = nil
-        if not currentFlyTween or not Q.flyingToExit then
+        -- Chỉ tạo tween mới nếu chưa đang bay thoát, hoặc tween cũ đã chết / quá chậm
+        local needNew = (not Q.flyingToExit) or (not currentFlyTween)
+            or (currentFlyTween and currentFlyTween.PlaybackState ~= Enum.PlaybackState.Playing)
+        if needNew then
             if currentFlyTween then pcall(function() currentFlyTween:Cancel() end) end
+            if currentRaidTween then pcall(function() currentRaidTween:Cancel() end); currentRaidTween = nil end
             Q.flyingToExit = true
-            local tw = TweenService:Create(hrp, TweenInfo.new(dist / flySpeed, Enum.EasingStyle.Linear), {CFrame = CFrame.new(ex + Vector3.new(0, 2, 0))})
+            local duration = math.max(dist / exitSpeed, 0.05)
+            local tw = TweenService:Create(hrp, TweenInfo.new(duration, Enum.EasingStyle.Linear), {CFrame = exitCF})
             currentFlyTween = tw
             tw:Play()
             tw.Completed:Connect(function()
                 if currentFlyTween == tw then currentFlyTween = nil end
                 Q.flyingToExit = false
             end)
-            Q.qlog("Sea 1: xong Underwater City -> bay tới điểm thoát", ex)
+            Q.qlog("Sea 1: bay NHANH tới điểm thoát Underwater", ex, "speed", exitSpeed)
         end
         return true
     end
 
+    -- Đã sát vòng xoáy: dừng bay, đứng yên, gọi thoát ngay
     if currentFlyTween and Q.flyingToExit then
         pcall(function() currentFlyTween:Cancel() end)
         currentFlyTween = nil
     end
     Q.flyingToExit = false
     Q.exitNearAt = Q.exitNearAt or tick()
-    hrp.CFrame = CFrame.new(ex + Vector3.new(0, 2, 0))
+    hrp.CFrame = exitCF
     hrp.AssemblyLinearVelocity = Vector3.zero
+    hrp.AssemblyAngularVelocity = Vector3.zero
 
-    -- chạm thử các part cổng / xoáy / portal gần điểm thoát để được dịch chuyển ra ngoài
-    if tick() - Q.exitNearAt >= Q.PORTAL_WAIT and tick() - (Q.exitTouchAt or 0) > 2 then
+    -- Chờ rất ngắn rồi chạm + requestEntrance liên tục (mỗi ~0.8s)
+    if tick() - Q.exitNearAt >= waitGate and tick() - (Q.exitTouchAt or 0) > 0.8 then
         Q.exitTouchAt = tick()
         Q.touchUnderwaterExit(hrp, ex)
+        local commF = getCommF()
+        if commF then
+            local surfaceEntrance = Vector3.new(61163.8515625, 5.342342376708252, 1819.7841796875)
+            pcall(function()
+                commF:InvokeServer("requestEntrance", surfaceEntrance)
+            end)
+            Q.qlog("Sea 1: requestEntrance thoát Underwater City ->", surfaceEntrance)
+        end
     end
 
-    -- chờ dịch chuyển tối đa 25 giây; quá thời gian thì thôi để farm không bị kẹt mãi ở đây
-    if tick() - Q.exitNearAt > Q.PORTAL_WAIT + 25 then
-        Q.qlog("Sea 1: đứng ở điểm thoát 25s mà chưa ra ngoài -> bỏ qua")
+    -- chờ dịch chuyển tối đa ~12 giây rồi bỏ cuộc để không kẹt farm chest
+    if tick() - Q.exitNearAt > waitGate + 12 then
+        Q.qlog("Sea 1: đứng ở điểm thoát quá lâu mà chưa ra ngoài -> bỏ qua")
         return false
     end
     return true
@@ -1351,14 +1388,73 @@ function Q.ThirdSeaPortals.classify(pos)
     if pos.X >= -6800 and pos.X <= -3900 and pos.Z >= -4750 and pos.Z <= -1650 then
         return "Castle on the Sea"
     end
-    -- Bao phủ cả rìa khu Floating Turtle nơi một số NPC farm level xuất hiện.
-    if pos.X >= -16000 and pos.X <= -10600 and pos.Z >= -11200 and pos.Z <= -4900 then
+    -- Floating Turtle / Mansion + rìa đảo (Electric Claw NPC ~ -10370, -10126 nằm ngoài khung cũ -10600).
+    -- Mở rộng X tới -9800 và Z một chút để mua võ / farm vẫn nhận diện đúng hub portal.
+    if pos.X >= -16000 and pos.X <= -9800 and pos.Z >= -11500 and pos.Z <= -4800 then
         return "Floating Turtle"
     end
-    if pos.X >= 3650 and pos.X <= 7600 and pos.Z >= -2100 and pos.Z <= 2300 then
+    -- Hydra Island + khu đảo phụ nữ (Amazon / Female Islander) quanh X~5400, Z~750
+    if pos.X >= 3500 and pos.X <= 7800 and pos.Z >= -2200 and pos.Z <= 2500 then
         return "Hydra Island"
     end
     return nil
+end
+
+-- Nhận diện đảo xuất phát có dung sai: đang ở ngoài khung chính (bến tàu, ven biển, rìa đảo)
+-- nhưng vẫn gần một hub thì coi như đang ở hub đó, để Mua võ vẫn đi cổng thay vì bay thẳng qua biển.
+function Q.ThirdSeaPortals.classifyNear(pos)
+    local exact = Q.ThirdSeaPortals.classify(pos)
+    if exact or not World3 or not pos then return exact end
+    local best, bestD
+    for name, info in pairs(Q.ThirdSeaPortals.hubs) do
+        local d = Q.ThirdSeaPortals.tp3DistanceXZ(pos, info.center)
+        local lim = (name == "Castle on the Sea") and 2400 or 1900
+        if d <= lim and (not bestD or d < bestD) then best, bestD = name, d end
+    end
+    return best
+end
+
+-- Dự phòng khi không xác minh được portal trên map: đứng ở điểm cổng đã biết của đảo hiện tại
+-- rồi gọi requestEntrance tới điểm cổng của đảo kế tiếp (Hydra/Turtle -> Castle -> đích).
+function Q.ThirdSeaPortals.remoteFallback(fromIsland, targetIsland, speed, active)
+    local route = Q.ThirdSeaPortals.buildRoute(fromIsland, targetIsland)
+    if not route then return false end
+    local commF = getCommF()
+    if not commF then return false end
+    local current = fromIsland
+    for _, nextIsland in ipairs(route) do
+        if active and not active() then return false end
+        local here = Q.ThirdSeaPortals.tp3GetRoot(nil)
+        if not here then return false end
+        if Q.ThirdSeaPortals.classifyNear(here.Position) == nextIsland then
+            current = nextIsland
+        else
+            local src = Q.ThirdSeaPortals.hubs[current]
+            local dst = Q.ThirdSeaPortals.hubs[nextIsland]
+            if not src or not dst then return false end
+            Q.ThirdSeaPortals.status = "Dự phòng: bay tới cổng " .. current .. " rồi requestEntrance → " .. nextIsland
+            _G.MinhHubThirdSeaPortalStatus = Q.ThirdSeaPortals.status
+            if not Q.ThirdSeaPortals.tp3MoveRootTo(src.portal + Vector3.new(0, 2, 0), speed, active) then return false end
+            local arrived = false
+            for _ = 1, 4 do
+                if active and not active() then return false end
+                pcall(function() commF:InvokeServer("requestEntrance", dst.portal) end)
+                local t0 = tick()
+                while tick() - t0 < 2.5 do
+                    local r = Q.ThirdSeaPortals.tp3GetRoot(nil)
+                    if r and Q.ThirdSeaPortals.classify(r.Position) == nextIsland then arrived = true break end
+                    task.wait(0.15)
+                end
+                if arrived then break end
+            end
+            if not arrived then return false end
+            Q.ThirdSeaPortals.cache = {}
+            current = nextIsland
+            task.wait(0.4)
+        end
+    end
+    local r = Q.ThirdSeaPortals.tp3GetRoot(nil)
+    return r ~= nil and Q.ThirdSeaPortals.classify(r.Position) == targetIsland
 end
 
 function Q.ThirdSeaPortals.tp3ValueIsTrue(value)
@@ -1654,14 +1750,21 @@ function Q.ThirdSeaPortals.tp3CollectPortals(islandName, forceRefresh)
         if valid then return cache.items end
     end
     local info = Q.ThirdSeaPortals.hubs[islandName]
-    if not info or Q.ThirdSeaPortals.tp3NoticePortalDenied() then return {} end
-    local knownUnlock = Q.ThirdSeaPortals.tp3ReadUnlockFlag()
-    if knownUnlock == false then
-        Q.ThirdSeaPortals.status = "Portal khóa: chưa có cờ xác nhận đã hạ rip_indra"
+    if not info then return {} end
+    if Q.ThirdSeaPortals.tp3NoticePortalDenied() then
+        Q.ThirdSeaPortals.status = "Portal khóa (thông báo game) — bay đường thường"
         _G.MinhHubThirdSeaPortalStatus = Q.ThirdSeaPortals.status
         Q.ThirdSeaPortals.cache[islandName] = {at = now, items = {}}
         return {}
     end
+    local knownUnlock = Q.ThirdSeaPortals.tp3ReadUnlockFlag()
+    if knownUnlock == false then
+        Q.ThirdSeaPortals.status = "Portal chưa mở (chưa hạ rip_indra) — bay đường thường"
+        _G.MinhHubThirdSeaPortalStatus = Q.ThirdSeaPortals.status
+        Q.ThirdSeaPortals.cache[islandName] = {at = now, items = {}}
+        return {}
+    end
+    -- knownUnlock == true hoặc nil: quét portal hoạt động trên map
     local map = workspace:FindFirstChild("Map")
     if not map then return {} end
     local found = {}
@@ -2935,13 +3038,14 @@ function Q.ClaimCakeQuest()
     return claimQuestCore(questName, questLevel, mobName, questNpcPos)
 end
 
--- UI HELPERS & THEME CONFIG (MINH HUB STYLE)
-local BANANA_YELLOW       = Color3.fromRGB(0, 170, 255)   -- xanh neon công nghệ (điểm nhấn)
-local BANANA_DARK         = Color3.fromRGB(30, 90, 130)   -- viền cửa sổ
-local BANANA_BG           = Color3.fromRGB(8, 12, 20)
-local BANANA_SIDEBAR      = Color3.fromRGB(5, 8, 14)
-local BANANA_CARD         = Color3.fromRGB(14, 22, 36)
-local BANANA_CARD_BORDER  = Color3.fromRGB(28, 62, 92)
+-- UI HELPERS & THEME CONFIG (BANANA CAT-INSPIRED MINH HUB STYLE)
+-- Banana Cat-inspired palette: matte charcoal panels with warm banana-gold accents.
+local BANANA_YELLOW       = Color3.fromRGB(239, 193, 66)
+local BANANA_DARK         = Color3.fromRGB(105, 82, 35)
+local BANANA_BG           = Color3.fromRGB(18, 18, 20)
+local BANANA_SIDEBAR      = Color3.fromRGB(13, 13, 15)
+local BANANA_CARD         = Color3.fromRGB(31, 31, 35)
+local BANANA_CARD_BORDER  = Color3.fromRGB(58, 54, 45)
 local BANANA_TEXT_ON      = Color3.fromRGB(255, 255, 255)
 
 local function addCorner(parent, radius)
@@ -3002,27 +3106,27 @@ toggleBtn.Image = ""
 toggleBtn.ImageColor3 = BANANA_YELLOW
 toggleBtn.Parent = screenGui
 addCorner(toggleBtn, 10)
-addStroke(toggleBtn, Color3.fromRGB(70, 210, 255), 1.6)
+addStroke(toggleBtn, BANANA_YELLOW, 1.6)
 do
     local bananaIcon = Instance.new("TextLabel")
     bananaIcon.Size = UDim2.new(1, 0, 1, 0)
     bananaIcon.BackgroundTransparency = 1
-    bananaIcon.Text = "M"
-    bananaIcon.TextColor3 = Color3.fromRGB(70, 210, 255)
-    bananaIcon.TextSize = 28
+    bananaIcon.Text = "🍌"
+    bananaIcon.TextColor3 = BANANA_YELLOW
+    bananaIcon.TextSize = 26
     bananaIcon.Font = Enum.Font.GothamBlack
     bananaIcon.Active = false
     bananaIcon.Parent = toggleBtn
 end
 
-local MH = { W = 520, H = 390, HEAD = 34, SIDE = 165 }
+local MH = { W = 640, H = 370, HEAD = 30, SIDE = 190 }
 
 local mainFrame = Instance.new("Frame")
 mainFrame.Name = "MainFrame"
 mainFrame.Size = UDim2.new(0, MH.W, 0, MH.H)
 mainFrame.Position = UDim2.new(0.5, -MH.W / 2, 0.5, -MH.H / 2)
 mainFrame.BackgroundColor3 = BANANA_BG
-mainFrame.BackgroundTransparency = 0.06
+mainFrame.BackgroundTransparency = 0.08
 mainFrame.BorderSizePixel = 0
 mainFrame.ClipsDescendants = true
 mainFrame.Visible = true
@@ -3041,30 +3145,30 @@ task.delay(15, function()
 end)
 addCorner(mainFrame, 6)
 do
-    local winStroke = addStroke(mainFrame, Color3.new(1, 1, 1), 1.2)
+    local winStroke = addStroke(mainFrame, BANANA_DARK, 1.3)
     winStroke.Transparency = 0.1
     local winGrad = Instance.new("UIGradient")
-    winGrad.Color = ColorSequence.new(Color3.fromRGB(70, 210, 255), Color3.fromRGB(24, 44, 70))
+    winGrad.Color = ColorSequence.new(Color3.fromRGB(239, 193, 66), Color3.fromRGB(55, 45, 28))
     winGrad.Rotation = 45
     winGrad.Parent = winStroke
 
     pcall(function()
-    -- Nền kiểu HUD: lưới mờ + tia quét + 4 góc khung (nằm dưới mọi nội dung)
+    -- Hoạ tiết nền vàng rất nhẹ, giữ bố cục tối giản kiểu Banana Cat Hub
     local function techRect(x, y, w, h, tr, name)
         local f = Instance.new("Frame")
         f.Name = name or "TechDeco"
         f.Position = UDim2.new(0, x, 0, y)
         f.Size = UDim2.new(0, w, 0, h)
-        f.BackgroundColor3 = Color3.fromRGB(70, 210, 255)
+        f.BackgroundColor3 = BANANA_YELLOW
         f.BackgroundTransparency = tr
         f.BorderSizePixel = 0
         f.Active = false
         f.Parent = mainFrame
         return f
     end
-    for gx = 0, MH.W, 28 do techRect(gx, 0, 1, MH.H, 0.955, "TechGrid") end
-    for gy = 0, MH.H, 28 do techRect(0, gy, MH.W, 1, 0.955, "TechGrid") end
-    local scan = techRect(0, -50, MH.W, 50, 0, "TechScan")
+    for gx = 0, MH.W, 28 do techRect(gx, 0, 1, MH.H, 0.988, "TechGrid") end
+    for gy = 0, MH.H, 28 do techRect(0, gy, MH.W, 1, 0.988, "TechGrid") end
+    local scan = techRect(0, -50, MH.W, 50, 0.96, "TechScan")
     do
         local g = Instance.new("UIGradient")
         g.Rotation = 90
@@ -3075,8 +3179,8 @@ do
     local function bracket(right, bottom)
         local x0 = right and (MH.W - 6) or 6
         local y0 = bottom and (MH.H - 6) or 6
-        techRect(right and x0 - 16 or x0, bottom and y0 - 2 or y0, 16, 2, 0.1, "TechBracket").ZIndex = 5
-        techRect(right and x0 - 2 or x0, bottom and y0 - 16 or y0, 2, 16, 0.1, "TechBracket").ZIndex = 5
+        techRect(right and x0 - 16 or x0, bottom and y0 - 2 or y0, 16, 2, 0.92, "TechBracket").ZIndex = 5
+        techRect(right and x0 - 2 or x0, bottom and y0 - 16 or y0, 2, 16, 0.92, "TechBracket").ZIndex = 5
     end
     bracket(false, true) bracket(true, true)
     task.spawn(function()
@@ -3102,7 +3206,7 @@ local header = Instance.new("Frame")
 header.Name = "Header"
 header.Size = UDim2.new(1, 0, 0, MH.HEAD)
 header.BackgroundColor3 = BANANA_SIDEBAR
-header.BackgroundTransparency = 0.35
+header.BackgroundTransparency = 0.08
 header.BorderSizePixel = 0
 header.Parent = mainFrame
 
@@ -3111,23 +3215,33 @@ do
     headLine.Name = "HeaderLine"
     headLine.Size = UDim2.new(1, 0, 0, 1)
     headLine.Position = UDim2.new(0, 0, 1, -1)
-    headLine.BackgroundColor3 = Color3.fromRGB(70, 210, 255)
+    headLine.BackgroundColor3 = BANANA_YELLOW
     headLine.BackgroundTransparency = 0.7
     headLine.BorderSizePixel = 0
     headLine.Parent = header
 end
 
 local headerTitle = Instance.new("TextLabel")
-headerTitle.Size = UDim2.new(1, -150, 1, 0)
-headerTitle.Position = UDim2.new(0, 12, 0, 0)
+headerTitle.Size = UDim2.new(1, -90, 1, 0)
+headerTitle.Position = UDim2.new(0, 42, 0, 0)
 headerTitle.BackgroundTransparency = 1
-headerTitle.Text = "MINH_HUB <font color=\"#46D2FF\">//</font> <font color=\"#6F8CA8\">BLOX_FRUITS // PREMIUM</font>"
+headerTitle.Text = "<font color=\"#EFC142\">Banana Cat Hub</font>  V2- Blox Fruit"
 headerTitle.RichText = true
 headerTitle.TextColor3 = Color3.fromRGB(235, 237, 245)
-headerTitle.TextSize = 12
-headerTitle.Font = Enum.Font.Code
-headerTitle.TextXAlignment = Enum.TextXAlignment.Left
+headerTitle.TextSize = 14
+headerTitle.Font = Enum.Font.GothamBold
+headerTitle.TextXAlignment = Enum.TextXAlignment.Center
 headerTitle.Parent = header
+
+local headerBanana = Instance.new("TextLabel")
+headerBanana.Name = "BananaCatLogo"
+headerBanana.Size = UDim2.fromOffset(28, 26)
+headerBanana.Position = UDim2.fromOffset(6, 2)
+headerBanana.BackgroundTransparency = 1
+headerBanana.Text = "🍌"
+headerBanana.TextSize = 18
+headerBanana.Font = Enum.Font.GothamBold
+headerBanana.Parent = header
 
 function MH.winBtn(text, xOff, size)
     local b = Instance.new("TextButton")
@@ -3159,7 +3273,7 @@ sidebar.Name = "Sidebar"
 sidebar.Size = UDim2.new(0, MH.SIDE, 1, -MH.HEAD)
 sidebar.Position = UDim2.new(0, 0, 0, MH.HEAD)
 sidebar.BackgroundColor3 = BANANA_SIDEBAR
-sidebar.BackgroundTransparency = 1
+sidebar.BackgroundTransparency = 0.12
 sidebar.BorderSizePixel = 0
 sidebar.Parent = mainFrame
 
@@ -3188,9 +3302,10 @@ do
     -- Logo lớn (chữ M cách điệu trong khung thoi) ở đầu thanh bên
     local logoWrap = Instance.new("Frame")
     logoWrap.Name = "LogoWrap"
-    logoWrap.Size = UDim2.new(1, 0, 0, 100)
+    logoWrap.Size = UDim2.new(1, 0, 0, 0)
     logoWrap.LayoutOrder = -100
     logoWrap.BackgroundTransparency = 1
+    logoWrap.Visible = false
     logoWrap.Parent = sidebar
 
     local diamond = Instance.new("Frame")
@@ -3207,8 +3322,8 @@ do
     local logoText = Instance.new("TextLabel")
     logoText.Size = UDim2.new(1, 0, 1, 0)
     logoText.BackgroundTransparency = 1
-    logoText.Text = "M"
-    logoText.TextSize = 46
+    logoText.Text = "🍌"
+    logoText.TextSize = 38
     logoText.Font = Enum.Font.GothamBlack
     logoText.TextColor3 = Color3.fromRGB(255, 255, 255)
     logoText.Parent = logoWrap
@@ -3249,15 +3364,15 @@ pagesFolder.Parent = mainFrame
 
 local tabs = {}
 local function createTab(tabName, iconText, isDefault)
-    local tabLabel = ({Farm = "Main", Boss = "Multi Farm", Gacha = "Items", Config = "Farm Settings"})[tabName] or tabName
+    local tabLabel = ({Farm = "Farming", Boss = "Stack Farming", Raid = "Fruit and Raid, Dungeon", Gacha = "Farming Other", Shop = "Shop", Config = "Setting Farm", ESP = "LocalPlayer", Skills = "Hold and Select Skill", Status = "Status And Server"})[tabName] or tabName
     local tabBtn = Instance.new("TextButton")
     tabBtn.Size = UDim2.new(1, -20, 0, 28)
     tabBtn.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-    tabBtn.BackgroundTransparency = isDefault and 0.9 or 1
+    tabBtn.BackgroundTransparency = isDefault and 0.86 or 1
     tabBtn.AutoButtonColor = false
     tabBtn.Text = tabLabel
     tabBtn.TextColor3 = isDefault and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(165, 168, 180)
-    tabBtn.Font = Enum.Font.Code
+    tabBtn.Font = Enum.Font.GothamSemibold
     tabBtn.TextSize = 12
     tabBtn.TextXAlignment = Enum.TextXAlignment.Left
     tabBtn.Parent = sidebar
@@ -3269,16 +3384,17 @@ local function createTab(tabName, iconText, isDefault)
 
     -- biểu tượng đơn sắc bên trái tên tab
     do
-        local iconMap = {Farm = "⚔", Boss = "♛", Raid = "☄", Gacha = "✦", Shop = "⛁", Config = "⚙", ESP = "◉", Status = "▤"}
+        local iconMap = {Farm = "🍌", Boss = "♛", Raid = "☄", Gacha = "✦", Shop = "▣", Config = "⚙", ESP = "◉", Status = "▤"}
         local ic = Instance.new("TextLabel")
         ic.Size = UDim2.new(0, 22, 1, 0)
         ic.Position = UDim2.new(0, -26, 0, 0)
         ic.BackgroundTransparency = 1
         ic.Text = iconMap[tabName] or "▪"
-        ic.TextColor3 = Color3.fromRGB(200, 204, 216)
+        ic.TextColor3 = BANANA_YELLOW
         ic.TextSize = 14
         ic.Font = Enum.Font.GothamBold
         ic.Active = false
+        ic.Visible = false
         ic.Parent = tabBtn
     end
 
@@ -3287,7 +3403,7 @@ local function createTab(tabName, iconText, isDefault)
     indicator.Size = UDim2.new(0, 3, 0, 16)
     indicator.AnchorPoint = Vector2.new(0, 0.5)
     indicator.Position = UDim2.new(0, -10, 0.5, 0)
-    indicator.BackgroundColor3 = Color3.fromRGB(70, 210, 255)
+    indicator.BackgroundColor3 = BANANA_YELLOW
     indicator.BorderSizePixel = 0
     indicator.Visible = isDefault
     indicator.Parent = tabBtn
@@ -3346,7 +3462,7 @@ local function createTab(tabName, iconText, isDefault)
         indicator.Visible = true
         TweenService:Create(indicator, TweenInfo.new(0.22, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Size = UDim2.new(0, 3, 0, 16)}):Play()
         tabBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        tabBtn.BackgroundTransparency = 0.9
+        tabBtn.BackgroundTransparency = 0.86
         pageTitle.Text = tabLabel
     end)
 
@@ -3807,9 +3923,9 @@ do
     local searchWrap = Instance.new("Frame")
     searchWrap.Name = "SearchWrap"
     searchWrap.Size = UDim2.new(0.92, 0, 0, 30)
-    searchWrap.LayoutOrder = -10
+    searchWrap.LayoutOrder = -90
     searchWrap.BackgroundColor3 = BANANA_CARD
-    searchWrap.Visible = false
+    searchWrap.Visible = true
     searchWrap.Parent = sidebar
     addCorner(searchWrap, 8)
     addStroke(searchWrap, BANANA_CARD_BORDER, 1)
@@ -3918,7 +4034,7 @@ local function createToggleFeature(parentPage, featureId, title, subTitle, layou
     clickArea.Parent = card
 
     clickArea.MouseEnter:Connect(function()
-        TweenService:Create(card, TweenInfo.new(0.12), {BackgroundColor3 = Color3.fromRGB(48, 48, 55)}):Play()
+        TweenService:Create(card, TweenInfo.new(0.12), {BackgroundColor3 = Color3.fromRGB(48, 45, 37)}):Play()
     end)
     clickArea.MouseLeave:Connect(function()
         TweenService:Create(card, TweenInfo.new(0.12), {BackgroundColor3 = BANANA_CARD}):Play()
@@ -4932,16 +5048,10 @@ createToggleFeature(raidPage, "AutoStartRaidToggle", "Auto Start Raid", "Automat
     _G.StartRaid = state
 end)
 
-createToggleFeature(raidPage, "AutoRaidToggle", "Auto Raid", "Automatically defeat mobs and travel between Raid islands", 4, autoRaidEnabled, function(state)
+createToggleFeature(raidPage, "AutoRaidToggle", "Auto Raid", "Automatically defeat mobs and travel between Raid islands (does not force Buy Chip / Start Raid)", 4, autoRaidEnabled, function(state)
     autoRaidEnabled = state
     _G.Dungeon = state
-    -- Auto Raid là công tắc tổng: tự bật/tắt cả mua Chip và Start Raid.
-    -- Các cờ RaidAutoBuy/RaidAutoStart cũng giúp những vòng lặp khác nhận cùng trạng thái.
-    autoBuyChipEnabled, _G.AutoBuyChip = state, state
-    autoStartRaidEnabled, _G.StartRaid = state, state
-    _G.RaidAutoBuy, _G.RaidAutoStart = state, state
-    if toggleUpdateFuncs["AutoBuyChipToggle"] then toggleUpdateFuncs["AutoBuyChipToggle"](state) end
-    if toggleUpdateFuncs["AutoStartRaidToggle"] then toggleUpdateFuncs["AutoStartRaidToggle"](state) end
+    -- Không tự bật/tắt Auto Buy Chip và Auto Start Raid: người dùng điều khiển riêng.
     if state then
         if toggleUpdateFuncs["AutoFarmTargetToggle"] then toggleUpdateFuncs["AutoFarmTargetToggle"](false) end
         if toggleUpdateFuncs["AutoFarmMaterialToggle"] then toggleUpdateFuncs["AutoFarmMaterialToggle"](false) end
@@ -5162,14 +5272,14 @@ local function raidFarmEnabled()
     return (autoRaidEnabled or _G.Dungeon) and true or false
 end
 
--- Auto Raid luôn bao gồm Auto Buy Chip + Auto Start Raid.
--- Hai chức năng riêng vẫn có thể bật độc lập khi không bật công tắc tổng.
+-- Auto Raid KHÔNG tự kéo theo Auto Buy Chip / Auto Start Raid: hai chức năng này
+-- chỉ chạy khi chính công tắc của chúng được bật.
 local function raidStartEnabled()
-    return (raidFarmEnabled() or autoStartRaidEnabled or _G.StartRaid == true or _G.RaidAutoStart == true) and true or false
+    return (autoStartRaidEnabled or _G.StartRaid == true or _G.RaidAutoStart == true) and true or false
 end
 
 local function raidBuyEnabled()
-    return (raidFarmEnabled() or autoBuyChipEnabled or _G.AutoBuyChip == true or _G.RaidAutoBuy == true) and true or false
+    return (autoBuyChipEnabled or _G.AutoBuyChip == true or _G.RaidAutoBuy == true) and true or false
 end
 
 local function raidLog(...)
@@ -7019,44 +7129,131 @@ local function updateFruitStock(isMirage)
 
     pcall(function()
         local commF = ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("CommF_")
-        if not commF then return end
+        if not commF then
+            local err = Instance.new("TextLabel")
+            err.Size = UDim2.new(1, 0, 0, 30)
+            err.BackgroundTransparency = 1
+            err.Text = "CommF_ remote not found"
+            err.TextColor3 = Color3.fromRGB(200, 150, 150)
+            err.Font = Enum.Font.Gotham
+            err.TextSize = 11
+            err.Parent = stockScroll
+            return
+        end
 
-        local fruitsData = isMirage and commF:InvokeServer("GetFruits", true) or commF:InvokeServer("GetFruits")
+        local fruitsData = nil
+        local attempts = {
+            function() return isMirage and commF:InvokeServer("GetFruits", true) or commF:InvokeServer("GetFruits") end,
+            function() return isMirage and commF:InvokeServer("GetFruits", true) or commF:InvokeServer("GetFruits", false) end,
+            function() return commF:InvokeServer("GetFruitsShop") end,
+        }
+        -- Thử lại vài lần: server đôi khi trả nil/false lúc mới vào game.
+        for round = 1, 3 do
+            for _, fn in ipairs(attempts) do
+                local ok, data = pcall(fn)
+                if ok and type(data) == "table" and next(data) ~= nil then
+                    fruitsData = data
+                    break
+                end
+            end
+            if fruitsData then break end
+            task.wait(0.8)
+        end
+
+        -- Đọc cờ "đang bán" không phân biệt hoa/thường và kiểu dữ liệu (bool / số / chuỗi).
+        local SALE_KEYS = {onsale = true, instock = true, stock = true, available = true}
+        local function saleFlag(fruit)
+            if type(fruit) ~= "table" then return nil end
+            local found = nil
+            for k, v in pairs(fruit) do
+                if type(k) == "string" and SALE_KEYS[string.lower(k)] then
+                    if v == true or v == 1 or v == "true" or v == "True" then return true end
+                    if v == false or v == 0 or v == "false" or v == "False" then found = false end
+                end
+            end
+            return found
+        end
+
+        local anyFlag = false
+        if type(fruitsData) == "table" then
+            for _, f in pairs(fruitsData) do
+                if saleFlag(f) ~= nil then anyFlag = true break end
+            end
+        end
+
+        local function fruitOnSale(fruit)
+            if type(fruit) ~= "table" then return false end
+            local flag = saleFlag(fruit)
+            if flag ~= nil then return flag end
+            -- không có cờ nào trong toàn bộ dữ liệu: coi mọi trái có giá là đang bán
+            if anyFlag then return false end
+            if fruit.Name or fruit.name then
+                if fruit.Price ~= nil or fruit.price ~= nil or fruit.Cost ~= nil then return true end
+            end
+            return false
+        end
+
+        local function fruitName(fruit)
+            return tostring(fruit.Name or fruit.name or fruit.Fruit or fruit.fruit or "Unknown")
+        end
+
+        local function fruitPrice(fruit)
+            local p = fruit.Price or fruit.price or fruit.Cost or fruit.cost
+            if type(p) == "number" then return "$" .. string.format("%d", p) end
+            if p ~= nil then return tostring(p) end
+            return "N/A"
+        end
+
         if type(fruitsData) == "table" then
             local count = 0
-            for _, fruit in pairs(fruitsData) do
-                if fruit.OnSale then
-                    count = count + 1
-                    local itemFrame = Instance.new("Frame")
-                    itemFrame.Size = UDim2.new(1, -6, 0, 28)
-                    itemFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
-                    itemFrame.LayoutOrder = count
-                    itemFrame.Parent = stockScroll
-                    addCorner(itemFrame, 5)
+            local listed = {}
+            for key, fruit in pairs(fruitsData) do
+                if type(fruit) ~= "table" then
+                    if type(key) == "string" and type(fruit) == "boolean" and fruit then
+                        fruit = { Name = key, OnSale = true }
+                    else
+                        fruit = nil
+                    end
+                elseif not (fruit.Name or fruit.name) and type(key) == "string" then
+                    local tmp = {}
+                    for k, v in pairs(fruit) do tmp[k] = v end
+                    tmp.Name = key
+                    fruit = tmp
+                end
+                if fruit and fruitOnSale(fruit) then
+                    local nm = fruitName(fruit)
+                    if not listed[nm] then
+                        listed[nm] = true
+                        count = count + 1
+                        local itemFrame = Instance.new("Frame")
+                        itemFrame.Size = UDim2.new(1, -6, 0, 28)
+                        itemFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+                        itemFrame.LayoutOrder = count
+                        itemFrame.Parent = stockScroll
+                        addCorner(itemFrame, 5)
 
-                    local nameLabel = Instance.new("TextLabel")
-                    nameLabel.Size = UDim2.new(0.6, 0, 1, 0)
-                    nameLabel.Position = UDim2.new(0, 8, 0, 0)
-                    nameLabel.BackgroundTransparency = 1
-                    nameLabel.Text = "• " .. tostring(fruit.Name or "Unknown")
-                    nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-                    nameLabel.Font = Enum.Font.GothamBold
-                    nameLabel.TextSize = 11
-                    nameLabel.TextXAlignment = Enum.TextXAlignment.Left
-                    nameLabel.Parent = itemFrame
+                        local nameLabel = Instance.new("TextLabel")
+                        nameLabel.Size = UDim2.new(0.6, 0, 1, 0)
+                        nameLabel.Position = UDim2.new(0, 8, 0, 0)
+                        nameLabel.BackgroundTransparency = 1
+                        nameLabel.Text = "• " .. nm
+                        nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+                        nameLabel.Font = Enum.Font.GothamBold
+                        nameLabel.TextSize = 11
+                        nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+                        nameLabel.Parent = itemFrame
 
-                    local priceLabel = Instance.new("TextLabel")
-                    priceLabel.Size = UDim2.new(0.4, -8, 1, 0)
-                    priceLabel.Position = UDim2.new(0.6, 0, 0, 0)
-                    priceLabel.BackgroundTransparency = 1
-                    
-                    local priceText = fruit.Price and ("$" .. string.format("%d", fruit.Price)) or "N/A"
-                    priceLabel.Text = priceText
-                    priceLabel.TextColor3 = Color3.fromRGB(85, 255, 127)
-                    priceLabel.Font = Enum.Font.GothamBold
-                    priceLabel.TextSize = 11
-                    priceLabel.TextXAlignment = Enum.TextXAlignment.Right
-                    priceLabel.Parent = itemFrame
+                        local priceLabel = Instance.new("TextLabel")
+                        priceLabel.Size = UDim2.new(0.4, -8, 1, 0)
+                        priceLabel.Position = UDim2.new(0.6, 0, 0, 0)
+                        priceLabel.BackgroundTransparency = 1
+                        priceLabel.Text = fruitPrice(fruit)
+                        priceLabel.TextColor3 = Color3.fromRGB(85, 255, 127)
+                        priceLabel.Font = Enum.Font.GothamBold
+                        priceLabel.TextSize = 11
+                        priceLabel.TextXAlignment = Enum.TextXAlignment.Right
+                        priceLabel.Parent = itemFrame
+                    end
                 end
             end
             
@@ -7064,14 +7261,36 @@ local function updateFruitStock(isMirage)
                 local emptyLabel = Instance.new("TextLabel")
                 emptyLabel.Size = UDim2.new(1, 0, 0, 30)
                 emptyLabel.BackgroundTransparency = 1
-                emptyLabel.Text = isMirage and "Mirage Island stock data not found!" or "Unable to load shop data!"
+                local total = 0
+                local sample = ""
+                for k, v in pairs(fruitsData) do
+                    total = total + 1
+                    if total == 1 and type(v) == "table" then
+                        local keys = {}
+                        for kk in pairs(v) do keys[#keys + 1] = tostring(kk) end
+                        sample = " | mẫu: " .. table.concat(keys, ",")
+                    end
+                end
+                emptyLabel.TextWrapped = true
+                emptyLabel.Size = UDim2.new(1, 0, 0, 44)
+                emptyLabel.Text = (isMirage and "Mirage: no fruits on sale right now" or "Shop: no fruits on sale right now")
+                    .. " (server trả " .. total .. " mục" .. sample .. ")"
                 emptyLabel.TextColor3 = Color3.fromRGB(200, 150, 150)
                 emptyLabel.Font = Enum.Font.Gotham
                 emptyLabel.TextSize = 11
                 emptyLabel.Parent = stockScroll
             end
 
-            stockScroll.CanvasSize = UDim2.new(0, 0, 0, count * 32)
+            stockScroll.CanvasSize = UDim2.new(0, 0, 0, math.max(count, 1) * 32)
+        else
+            local emptyLabel = Instance.new("TextLabel")
+            emptyLabel.Size = UDim2.new(1, 0, 0, 30)
+            emptyLabel.BackgroundTransparency = 1
+            emptyLabel.Text = "Unable to load fruit stock (server returned no table)"
+            emptyLabel.TextColor3 = Color3.fromRGB(200, 150, 150)
+            emptyLabel.Font = Enum.Font.Gotham
+            emptyLabel.TextSize = 11
+            emptyLabel.Parent = stockScroll
         end
     end)
 end
@@ -7084,9 +7303,17 @@ btnMirageStock.MouseButton1Click:Connect(function()
     updateFruitStock(true)
 end)
 
+shopPage:GetPropertyChangedSignal("Visible"):Connect(function()
+    if shopPage.Visible then _G.MHSpawn(function() pcall(updateFruitStock, currentShopMode == true) end) end
+end)
+
 _G.MHSpawn(function()
     task.wait(1)
     updateFruitStock(false)
+    -- Làm mới định kỳ (shop đổi trái mỗi 4 giờ; Mirage đổi theo đảo) để luôn hiện đúng kho đang bán.
+    while task.wait(60) do
+        if shopPage and shopPage.Visible then pcall(updateFruitStock, currentShopMode == true) end
+    end
 end)
 
 -- TAB SETTINGS & CONFIG
@@ -9311,24 +9538,34 @@ _G.MHSpawn(function()
                         end
                     end
                     currentTarget = bestChest
-                    if not bestChest then
-                        -- Hết rương ở Underwater City (Sea 1): bay ra qua xoáy nước NGAY để tìm rương bên ngoài,
-                        -- thay vì đứng chờ trong thành phố. Phải liên tục 2s không thấy rương mới thoát
-                        -- (tránh trường hợp rương chưa kịp tải sau khi vừa dịch chuyển xuống).
-                        if Q.inUnderwaterCity(hrp) then
-                            noneSince = noneSince or tick()
-                            if tick() - noneSince >= 2 then
-                                _G.ChestStatus = "Hết rương ở đảo dưới nước — đang bay ra ngoài"
-                                Q.leaveUnderwaterCity(hrp)
-                                return
+
+                    -- Sea 1: đang ở Underwater City → thoát NHANH qua vòng xoáy rồi mới farm chest ngoài.
+                    -- Không chờ 1.2s; không để vòng chest khác hủy tween thoát.
+                    if Q.inUnderwaterCity(hrp) then
+                        local outsideChest = false
+                        for _, c in ipairs(cands) do
+                            if c.pos and c.pos.X < 50000 then
+                                outsideChest = true
+                                break
                             end
-                        else
-                            noneSince = nil
                         end
+                        -- Còn dưới nước mà cần ra ngoài (hết rương dưới nước / có rương ngoài / đích ngoài)
+                        if outsideChest or not bestChest or (bestPos and bestPos.X < 50000) then
+                            _G.ChestStatus = "Đảo dưới nước — bay NHANH tới vòng xoáy thoát"
+                            -- Hủy tween farm chest cũ để không kéo tốc độ chậm
+                            if currentRaidTween then pcall(function() currentRaidTween:Cancel() end); currentRaidTween = nil end
+                            Q.leaveUnderwaterCity(hrp)
+                            return
+                        end
+                        noneSince = nil
+                    else
+                        noneSince = nil
+                    end
+
+                    if not bestChest then
                         _G.ChestStatus = "No chest available"
                         return
                     end
-                    noneSince = nil
                     _G.ChestStatus = ("Chest: %d collected, %d left"):format(collectedCnt, #cands)
 
                     -- Thùng rương ở Thuyền Ma (hoặc ở ngoài thuyền) dùng cùng bộ điều phối cổng.
@@ -10615,7 +10852,27 @@ local function getTargetEnemy()
 
                 if isMatchingTarget then
                     local distance = (hrp.Position - playerPos).Magnitude
-                    if distance < shortestDistance then
+                    -- Auto Level: ưu tiên quái gần khu quest/spawn (tránh "Pirate" ở đảo khác)
+                    if selectedFarmTarget == "Auto Level" then
+                        local mobPos
+                        pcall(function()
+                            local _, _, _, _, mp = GetQuestData()
+                            mobPos = mp
+                        end)
+                        if mobPos then
+                            local dSpawn = (hrp.Position - mobPos).Magnitude
+                            local score = distance + math.max(0, dSpawn - 400) * 2
+                            -- Quái cùng tên nhưng ở đảo khác (cách khu quest > 1500) thì bỏ qua, không bay theo.
+                            if dSpawn > 1500 then score = math.huge end
+                            if score < shortestDistance then
+                                shortestDistance = score
+                                closestEnemy = v
+                            end
+                        elseif distance < shortestDistance then
+                            shortestDistance = distance
+                            closestEnemy = v
+                        end
+                    elseif distance < shortestDistance then
                         shortestDistance = distance
                         closestEnemy = v
                     end
@@ -11045,10 +11302,14 @@ function FA.gunM1(tool, hrp, targets)
     --    -> đúng đường bắn thật của game (đủ tham số/ kiểm tra hợp lệ), không click màn hình.
     local nativeFired = false
     FA._gunRemoteAt = (netCount + toolCount > 0) and os.clock() or FA._gunRemoteAt
-    -- Đã bắn bằng remote thì KHÔNG Activate nữa: Activate làm súng vào trạng thái "reloading" và bắn lệch.
-    if netCount + toolCount == 0 and FA.installGunAim() then
-        FA._aimPos, FA._aimPart, FA._aimUntil = pos, first.hrp, os.clock() + 0.35
-        if os.clock() - (FA._gunActAt or 0) >= 0.1 then
+    -- FireServer/InvokeServer luôn "thành công" ở client dù server bỏ qua tham số sai, nên KHÔNG được coi là
+    -- đã bắn trúng. Luôn kích hoạt cả đường bắn gốc của súng (tool:Activate + aim ảo vào quái) theo nhịp ~0.25s.
+    do
+        local hookOk = FA.installGunAim()
+        if hookOk then
+            FA._aimPos, FA._aimPart, FA._aimUntil = pos, first.hrp, os.clock() + 0.5
+        end
+        if os.clock() - (FA._gunActAt or 0) >= 0.25 then
             FA._gunActAt = os.clock()
             nativeFired = pcall(function() tool:Activate() end)
         end
@@ -11078,8 +11339,7 @@ end
 FA.gunClickEnabled = true
 function FA.gunClick(tool, targets)
     if not FA.gunClickEnabled or not FA.isGunTool(tool) then return false end
-    if os.clock() - (FA._gunRemoteAt or 0) < 0.5 then return true end   -- remote đang bắn tốt, khỏi Activate
-    if os.clock() - (FA._gunClickAt or 0) < 0.12 then return true end
+    if os.clock() - (FA._gunClickAt or 0) < 0.2 then return true end
     local first = targets and targets[1]
     if not first or not first.hrp or not first.hrp.Parent then return false end
     FA._gunClickAt = os.clock()
@@ -11087,7 +11347,7 @@ function FA.gunClick(tool, targets)
     -- aim ảo: Mouse.Hit/Target trỏ vào quái trong lúc click (không đụng tới con trỏ thật)
     local aimOk = FA.installGunAim()
     if aimOk then
-        FA._aimPos, FA._aimPart, FA._aimUntil = first.hrp.Position, first.hrp, os.clock() + 0.35
+        FA._aimPos, FA._aimPart, FA._aimUntil = first.hrp.Position, first.hrp, os.clock() + 0.5
     end
 
     -- KHÔNG click màn hình (kiểu Banana): kích hoạt tool trực tiếp (tool:Activate) + aim ảo trỏ vào quái.
@@ -11935,6 +12195,7 @@ end
 function TY.doSummon(hrp, char)
     TY.hover = nil
     targetEnemy = nil
+    TY.skillNow = false
     local vases = TY.getVases(hrp.Position)
     local target
     for _, v in ipairs(vases) do
@@ -11953,6 +12214,7 @@ function TY.doSummon(hrp, char)
     end
     TY.goal = target.Position + Vector3.new(0, 5, 0)
     local d = (hrp.Position - target.Position).Magnitude
+    TY.skillNow = (d <= 40)   -- tab Skills tự dùng kỹ năng võ/kiếm/trái/súng khi ở gần bình
     if d <= 14 then
         TY.status = "Đang đập bình triệu hồi (" .. tostring(target.Name) .. ")"
         TY.vaseTry[target] = (TY.vaseTry[target] or 0) + 1
@@ -12002,6 +12264,15 @@ _G.MHSpawn(function()
                     TY.hover = nil; targetEnemy = nil
                     TY.kills = 0; TY.sideKills = 0; TY.phase = "farm"; TY.vaseTry = {}
                     TY.status = "Tyrant of the Skies defeated"
+                    -- Hạ boss xong thì dừng hẳn, không quay lại farm quái để triệu Tyrant lần nữa.
+                    _G.TyrantFarm = false
+                    _G.TyrantSummon = false
+                    TY.goal = nil; TY.hold = nil; TY.skillNow = false
+                    for _, id in ipairs({"AutoTyrantFarmToggle", "AutoTyrantSummonToggle"}) do
+                        if toggleUpdateFuncs[id] then pcall(toggleUpdateFuncs[id], false) end
+                    end
+                    pcall(stopAllFlying)
+                    return
                 end
 
                 -- Chọn giai đoạn
@@ -13230,6 +13501,8 @@ _G.MHSpawn(function()
                 and not _G.AutoUnlockSeaBusy and not _G.FruitPickupBusy
                 and not (Q.DK and Q.DK.on) and not (Q.SB and Q.SB.on)
                 and not (Q.MeleeShop and Q.MeleeShop.running)
+                and not autoChestEnabled and not Q.flyingToExit
+                and not (Q.SUB and Q.SUB.force)
                 and not RAID_FIXED.running then
                 targetEnemy = nil
                 if currentFlyTween then
@@ -15012,6 +15285,7 @@ do
                     if not anyOn then stLbl.Text = "Status: no key selected (open a dropdown and tick Z/X/C...)"; return end
                     local hasTarget = (targetEnemy ~= nil and targetEnemy ~= false)
                     if typeof(targetEnemy) == "Instance" and not targetEnemy.Parent then hasTarget = false end
+                    if not hasTarget and _G.TyrantSummon and TY and TY.skillNow then hasTarget = true end
                     if not hasTarget then stLbl.Text = "Status: no farm target (turn on Auto Farm first)"; return end
                     local char = LocalPlayer.Character
                     local tool = char and char:FindFirstChildOfClass("Tool")
@@ -15058,72 +15332,74 @@ do
         local function nextOrder() order += 1 return order end
 
         local function section(text)
+            local wrap = Instance.new("Frame")
+            wrap.Name = "StatusSectionHeader"
+            wrap.Size = UDim2.new(1, 0, 0, 22)
+            wrap.BackgroundTransparency = 1
+            wrap.LayoutOrder = nextOrder()
+            wrap.Parent = statusPage
+
             local lbl = Instance.new("TextLabel")
-            lbl.Size = UDim2.new(1, 0, 0, 22)
+            lbl.Size = UDim2.new(1, 0, 1, -4)
             lbl.BackgroundTransparency = 1
             lbl.Text = text
-            lbl.TextColor3 = Color3.fromRGB(255, 255, 255)
-            lbl.TextSize = 13
+            lbl.TextColor3 = BANANA_YELLOW
+            lbl.TextSize = 12
             lbl.Font = Enum.Font.GothamBold
-            lbl.TextXAlignment = Enum.TextXAlignment.Left
-            lbl.LayoutOrder = nextOrder()
-            lbl.Parent = statusPage
+            lbl.TextXAlignment = Enum.TextXAlignment.Center
+            lbl.Parent = wrap
+
+            local line = Instance.new("Frame")
+            line.AnchorPoint = Vector2.new(0.5, 1)
+            line.Position = UDim2.new(0.5, 0, 1, 0)
+            line.Size = UDim2.new(1, -8, 0, 1)
+            line.BackgroundColor3 = BANANA_YELLOW
+            line.BackgroundTransparency = 0.35
+            line.BorderSizePixel = 0
+            line.Parent = wrap
         end
 
         local function info(key, title)
             local card = Instance.new("Frame")
-            card.Size = UDim2.new(1, 0, 0, 46)
-            card.BackgroundColor3 = BANANA_CARD
-            card.BackgroundTransparency = 0.35
+            card.Size = UDim2.new(1, 0, 0, 28)
+            card.BackgroundColor3 = Color3.fromRGB(31, 31, 36)
+            card.BackgroundTransparency = 0.08
             card.LayoutOrder = nextOrder()
             card.Parent = statusPage
-            addCorner(card, 6)
-            local st = addStroke(card, BANANA_CARD_BORDER, 1)
-            st.Transparency = 0.7
+            addCorner(card, 7)
+            local st = addStroke(card, BANANA_CARD_BORDER, 0.8)
+            st.Transparency = 0.82
 
             local t = Instance.new("TextLabel")
-            t.Size = UDim2.new(1, -20, 0, 20)
-            t.Position = UDim2.new(0, 10, 0, 5)
+            t.Size = UDim2.new(1, -22, 1, 0)
+            t.Position = UDim2.new(0, 11, 0, 0)
             t.BackgroundTransparency = 1
-            t.Text = title
-            t.TextColor3 = Color3.fromRGB(235, 237, 245)
-            t.TextSize = 12
+            t.Text = title .. ": Scanning..."
+            t.TextColor3 = Color3.fromRGB(235, 235, 240)
+            t.TextSize = 11
             t.Font = Enum.Font.GothamMedium
             t.TextXAlignment = Enum.TextXAlignment.Left
+            t.TextTruncate = Enum.TextTruncate.AtEnd
             t.Parent = card
-
-            local v = Instance.new("TextLabel")
-            v.Size = UDim2.new(1, -20, 0, 16)
-            v.Position = UDim2.new(0, 10, 0, 25)
-            v.BackgroundTransparency = 1
-            v.Text = "Scanning..."
-            v.TextColor3 = Color3.fromRGB(140, 146, 160)
-            v.TextSize = 10
-            v.Font = Enum.Font.Gotham
-            v.TextXAlignment = Enum.TextXAlignment.Left
-            v.TextTruncate = Enum.TextTruncate.AtEnd
-            v.Parent = card
-            rows[key] = v
+            rows[key] = {Label = t, Title = title}
         end
 
         local function setv(key, text, good)
-            local v = rows[key]
-            if not v then return end
-            v.Text = text
-            v.TextColor3 = good and Color3.fromRGB(110, 200, 255) or Color3.fromRGB(140, 146, 160)
+            local row = rows[key]
+            if not row then return end
+            row.Label.Text = row.Title .. ": " .. tostring(text)
+            row.Label.TextColor3 = good and Color3.fromRGB(245, 245, 248) or Color3.fromRGB(190, 190, 198)
         end
 
-        section("Server Stats")
-        info("time",    "Server Time")
+        section("Status")
+        info("time",    "Timer")
         info("players", "Players")
         info("net",     "Ping / FPS")
         info("sea",     "Sea & Night")
         info("moon",    "Moon")
-        section("Server Events")
-        info("events",  "Đảo sự kiện (Mirage / Prehistoric / Kitsune)")
+        info("events",  "Event Islands (Mirage / Prehistoric / Kitsune)")
         info("fruits",  "Trái ác quỷ trên đất")
         info("bosses",  "Boss đang xuất hiện")
-        section("Local Stats")
         info("elite",   "Elite Progress")
         info("cake",    "Cake Prince")
         info("me",      "Nhân vật (Level / Beli / Fragments)")
@@ -15274,10 +15550,11 @@ do
         data.Indicator.Visible = true
         data.Button.TextColor3 = Color3.fromRGB(255, 255, 255)
         data.Button.BackgroundTransparency = 0.9
-        pageTitle.Text = "Status"
+        pageTitle.Text = "Status And Server"
 
         -- Thứ tự tab giống Maru: Status, Farm Settings, Main, Multi Farm, Raid, Items, Shop, ESP
-        for i, nm in ipairs({"Status", "Config", "Farm", "Boss", "Raid", "Gacha", "Shop", "ESP"}) do
+        -- Thứ tự danh mục theo ảnh Banana Cat Hub.
+        for i, nm in ipairs({"Shop", "Status", "ESP", "Config", "Skills", "Farm", "Boss", "Gacha", "Raid"}) do
             if tabs[nm] then tabs[nm].Button.LayoutOrder = i end
         end
 
@@ -15740,7 +16017,9 @@ _G.MHSpawn(function()
         local failureMessage = nil
         -- Tất cả luồng mua võ đều BAY THẬT bằng TweenService ở tốc độ 190.
         -- Không dùng CFrame để nhảy thẳng tới NPC hoặc cổng.
+        -- Sea 3: cho phép router portal (Castle / Floating Turtle / Hydra) nếu đã mở cổng.
         _G.MeleeInstantTravel = false
+        _G.__MHThirdSeaPortalBypass = false
 
         local ok, err = pcall(function()
             -- Sea 1: các võ khác đều bán ở ngoài; đang ở đảo dưới nước thì bay ra qua xoáy nước trước.
@@ -15842,6 +16121,58 @@ _G.MHSpawn(function()
                 end
             end
 
+            -- Sea 3: nếu đang ở Pháo đài / Đảo phụ nữ (Hydra) mà NPC ở Đảo rùa (Floating Turtle)
+            -- (Electric Claw, Godhuman...), ưu tiên đi cổng di chuyển khi đã mở.
+            if sea == 3 and Q.ThirdSeaPortals and not _G.__MHThirdSeaPortalBypass then
+                local root0 = getRoot()
+                if root0 then
+                    local fromIsland = Q.ThirdSeaPortals.classifyNear(root0.Position)
+                    local targetIsland = Q.ThirdSeaPortals.classify(npcPos)
+                    if fromIsland and targetIsland and fromIsland ~= targetIsland then
+                        setStatus("Sea 3 — " .. tostring(fromIsland) .. " → " .. tostring(targetIsland) .. " (portal nếu đã mở)...")
+                        local meleeActive = function()
+                            return Q.MeleeShop.running and Q.MeleeShop.token == token and _G.BuyMeleeActive == true
+                        end
+                        local okPlan, plan = pcall(function()
+                            return Q.ThirdSeaPortals.makePlan(root0.Position, npcPos)
+                        end)
+                        if not (okPlan and plan) then
+                            -- Không xác minh được portal trên map: thử đường dự phòng (requestEntrance) trước khi bay thường.
+                            local okFb, fbOk = pcall(Q.ThirdSeaPortals.remoteFallback, fromIsland, targetIsland, 190, meleeActive)
+                            if not meleeActive() then
+                                failureMessage = "Fighting-style purchase canceled."
+                                return
+                            end
+                            if okFb and fbOk then
+                                setStatus("Sea 3 — đã qua cổng tới " .. tostring(targetIsland))
+                            end
+                        end
+                        if okPlan and plan then
+                            local okRoute, reached = pcall(function()
+                                return Q.ThirdSeaPortals.execute(root0, CFrame.new(npcPos + Vector3.new(0, 3, 0)), 190, function()
+                                    return Q.MeleeShop.running and Q.MeleeShop.token == token and _G.BuyMeleeActive == true
+                                end, plan)
+                            end)
+                            if okRoute and reached == true then
+                                -- đã tới vùng đích qua portal; tiếp tục căn sát NPC bên dưới
+                            elseif not (Q.MeleeShop.running and Q.MeleeShop.token == token and _G.BuyMeleeActive == true) then
+                                failureMessage = "Fighting-style purchase canceled."
+                                return
+                            else
+                                -- Đã thử cổng trên map nhưng chưa tới đảo đích: thử đường dự phòng.
+                                local rNow = getRoot()
+                                local nowIsl = rNow and Q.ThirdSeaPortals.classifyNear(rNow.Position)
+                                if nowIsl and nowIsl ~= targetIsland then
+                                    pcall(Q.ThirdSeaPortals.remoteFallback, nowIsl, targetIsland, 190, meleeActive)
+                                end
+                            end
+                        else
+                            setStatus("Sea 3 — chưa mở/không thấy cổng; bay đường thường tới NPC " .. entry.style)
+                        end
+                    end
+                end
+            end
+
             setStatus("Sea " .. sea .. " — đang bay tới NPC " .. entry.style .. " (tốc độ 190)...")
             local destination = npcPos + Vector3.new(0, 3, 0)
             local arrived = false
@@ -15864,6 +16195,13 @@ _G.MHSpawn(function()
                         end
 
                         local duration = math.max(distance / 190, 0.05)
+                        -- Portal route có thể 2 chặng: cho thêm thời gian chờ
+                        local waitExtra = 3
+                        if Q.ThirdSeaPortals then
+                            local fi = Q.ThirdSeaPortals.classify(root.Position)
+                            local ti = Q.ThirdSeaPortals.classify(destination)
+                            if fi and ti and fi ~= ti then waitExtra = 35 end
+                        end
                         local tween = TweenService:Create(
                             root,
                             TweenInfo.new(duration, Enum.EasingStyle.Linear),
@@ -15871,7 +16209,7 @@ _G.MHSpawn(function()
                         )
                         currentRaidTween = tween
                         tween:Play()
-                        local deadline = os.clock() + duration + 3
+                        local deadline = os.clock() + duration + waitExtra
 
                         while tween.PlaybackState == Enum.PlaybackState.Playing and os.clock() < deadline do
                             if not (Q.MeleeShop.running and Q.MeleeShop.token == token and _G.BuyMeleeActive == true) then
