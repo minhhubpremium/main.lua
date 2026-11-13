@@ -4187,6 +4187,59 @@ Q.cakeBossSeenInBossArea = Q.cakeBossSeenInBossArea or false
 -- để sau khi hồi sinh vẫn quay lại cổng, không bị chuyển nhầm về farm quái Cake Land.
 Q.cakeReturnAfterDeath = Q.cakeReturnAfterDeath or false
 
+-- BOSS CAKE PRINCE / DOUGH KING ĐÃ CHẾT (hoặc dimension đã biến mất): reset NGAY toàn bộ trạng thái cổng/boss.
+-- Lỗi cũ: sau khi hạ boss, script vẫn "giữ vị trí cũ của boss" tối đa 25s; dimension biến mất nên vị trí đó là
+-- khoảng không -> nhân vật bay lên/ra ngoài hư không. Giờ reset tức thì rồi quay lại farm Cake Land bình thường.
+Q.cakeDoneAt = 0
+function Q.cakeBossDone(reason)
+    if tick() - Q.cakeDoneAt < 3 then return end
+    -- chỉ coi là xong khi thực sự đã tới/đang trong lượt boss (tránh reset nhầm lúc mới triệu hồi)
+    if not (Q.cakePortalTransitioned or Q.cakeBossSeenInBossArea or Q.cakeBossSeen) then return end
+    Q.cakeDoneAt = tick()
+    Q.cakeBossSeen = false
+    Q.cakeBossSeenAt = 0
+    Q.cakeLatchUntil = 0
+    Q.cakeNeedSummon = false
+    Q.cakePortalOpen = false
+    isCakePrinceReady = false
+    EH.cakeLeft = nil
+    cakePortalEntryAt = 0
+    Q.cakeTry = 0
+    Q.cakeLastTouch = 0
+    Q.cakeGateSince = nil
+    Q.cakePortalTransitioned = false
+    Q.cakePortalWaitPos = nil
+    Q.cakePortalTransitionedAt = 0
+    Q.cakeBossSeenInBossArea = false
+    Q.cakeReturnAfterDeath = false
+    Q._cakeBossCache = nil
+    Q.cakeLastBossPos = nil
+    Q.cakeSummonBlockUntil = tick() + 20
+    targetEnemy = nil
+    pcall(stopAllFlying)
+    pcall(function() cakeStatusText.Text = "✅ Đã hạ boss — quay lại farm quái Cake Land." end)
+    print("[CakePrince] Boss xong (" .. tostring(reason) .. "): reset trạng thái, quay lại farm Cake Land")
+end
+
+-- Nghe thông báo "The dimension has disappeared" của game (xuất hiện ngay sau khi boss chết)
+_G.MHSpawn(function()
+    local pg = LocalPlayer:WaitForChild("PlayerGui", 30)
+    if not pg then return end
+    local function check(d)
+        if d:IsA("TextLabel") or d:IsA("TextButton") then
+            local function look()
+                local t = string.lower(d.Text or "")
+                if t ~= "" and string.find(t, "dimension has disappeared", 1, true) then
+                    Q.cakeBossDone("dimension disappeared")
+                end
+            end
+            look()
+            d:GetPropertyChangedSignal("Text"):Connect(look)
+        end
+    end
+    pg.DescendantAdded:Connect(function(d) pcall(check, d) end)
+end)
+
 -- Trạng thái riêng cho Bones để biết script đang tìm quái, di chuyển hay đang đánh.
 Q.BonesFarm = Q.BonesFarm or { status = "Disabled", label = nil }
 function Q.BonesFarm.setStatus(status)
@@ -13526,6 +13579,14 @@ _G.MHSpawn(function()
                             EH.cakeLeft = 0
                             Q.cakeBossSeen, Q.cakeBossSeenAt = true, tick()
                             Q.cakeLatchUntil = tick() + 150
+                            do
+                                local bh = liveCakeBoss:FindFirstChildOfClass("Humanoid")
+                                Q.cakeHookedBoss = Q.cakeHookedBoss or setmetatable({}, {__mode = "k"})
+                                if bh and not Q.cakeHookedBoss[liveCakeBoss] then
+                                    Q.cakeHookedBoss[liveCakeBoss] = true
+                                    bh.Died:Connect(function() Q.cakeBossDone("boss died") end)
+                                end
+                            end
                             -- Đang đánh boss: cấm gửi lệnh mở cổng/triệu hồi lại (làm boss reset) và nhớ vị trí boss.
                             Q.cakeSummonBlockUntil = tick() + 120
                             Q.cakeNeedSummon = false
