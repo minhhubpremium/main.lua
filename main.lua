@@ -4215,6 +4215,7 @@ function Q.cakeBossDone(reason)
     Q._cakeBossCache = nil
     Q.cakeLastBossPos = nil
     Q.cakeSummonBlockUntil = tick() + 20
+    Q.cakeIgnoreOpenUntil = tick() + 60   -- 60s tới: bỏ qua phản hồi 'cổng đang mở' cũ của server, chỉ tin boss sống thật
     targetEnemy = nil
     pcall(stopAllFlying)
     pcall(function() cakeStatusText.Text = "✅ Đã hạ boss — quay lại farm quái Cake Land." end)
@@ -4452,6 +4453,20 @@ function Q.UpdateCakeSpawnerStatus(result)
         or string.find(lower, "open portal", 1, true) ~= nil
 
     local liveBoss = Q.CakeHasLiveBoss()
+    if raw ~= Q._cakeLastRaw then
+        Q._cakeLastRaw = raw
+        print("[CakePrince] Spawner trả về:", raw)   -- gửi dòng này cho dev nếu cổng/boss bị lỗi
+    end
+    -- Vừa hạ boss xong: server có thể còn trả lời kiểu "đã mở/spawned" -> không tin, tránh quay lại chờ cổng cũ.
+    if not liveBoss and tick() < (Q.cakeIgnoreOpenUntil or 0) then
+        explicitlyOpen = false
+        Q.cakePortalOpen = false
+        isCakePrinceReady = false
+        Q.cakeNeedSummon = false
+        EH.cakeLeft = remaining
+        cakeStatusText.Text = "🎂 Vừa hạ boss — quay lại farm quái Cake Land."
+        return
+    end
     if liveBoss or (explicitlyOpen and not explicitlyClosed) then
         Q.cakePortalOpen = true
         Q.cakeNeedSummon = false
@@ -4505,6 +4520,34 @@ _G.MHSpawn(function()
     while true do
         task.wait(4) -- chỉ kiểm tra định kỳ; không gọi remote liên tục theo từng frame
         pcall(function()
+            -- Boss biến mất sau khi đã vào khu boss: coi như đã hạ -> reset ngay (không chờ 25s / không đứng giữ chỗ).
+            if (Q.cakePortalTransitioned or Q.cakeBossSeenInBossArea) and not Q.CakeHasLiveBoss()
+                and tick() - (Q.cakeBossSeenAt or 0) > 8 and not Q.cakeReturnAfterDeath then
+                Q.cakeBossDone("boss missing")
+            end
+            -- WATCHDOG đứng yên: báo "cổng đã mở" nhưng không có boss và nhân vật đứng im >20s -> reset trạng thái.
+            if autoFarmEnabled and selectedFarmTarget == "Cake Prince" and isCakePrinceReady
+                and not Q.CakeHasLiveBoss() and not Q.cakePortalTransitioned and not Q.cakeReturnAfterDeath then
+                local hrpW = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if hrpW then
+                    local nearGate = (hrpW.Position - CAKE_PRINCE_GATE_POS).Magnitude <= 40
+                    if Q._cakeIdlePos and (hrpW.Position - Q._cakeIdlePos).Magnitude < 12 and not nearGate then
+                        if tick() - (Q._cakeIdleAt or tick()) > 20 then
+                            Q._cakeIdleAt = nil; Q._cakeIdlePos = nil
+                            Q.cakeBossSeen = false; Q.cakePortalOpen = false; isCakePrinceReady = false
+                            Q.cakeLatchUntil = 0; Q.cakeNeedSummon = false; EH.cakeLeft = nil
+                            cakePortalEntryAt = 0; Q.cakePortalWaitPos = nil
+                            Q.cakeIgnoreOpenUntil = tick() + 30
+                            targetEnemy = nil; pcall(stopAllFlying)
+                            print("[CakePrince] Đứng yên >20s khi báo cổng mở nhưng không có boss -> reset, farm lại Cake Land")
+                        end
+                    else
+                        Q._cakeIdlePos, Q._cakeIdleAt = hrpW.Position, tick()
+                    end
+                end
+            else
+                Q._cakeIdlePos, Q._cakeIdleAt = nil, nil
+            end
             if Q.CakeHasLiveBoss() then
                 Q.UpdateCakeSpawnerStatus("spawned")
                 return
