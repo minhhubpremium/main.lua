@@ -8050,6 +8050,11 @@ end)
 createInputFeature(settingsPage, "Fast Attack Targets", maxAttackTargets, 13, function(val)
     maxAttackTargets = math.clamp(math.floor(tonumber(val) or 2), 1, 6)
 end)
+createInputFeature(settingsPage, "Fast Attack Delay (0.02-0.3s)", 0.05, 13, function(val)
+    local v = math.clamp(tonumber(val) or 0.05, 0.02, 0.3)
+    FA.interval = v
+    FA.gunClickInterval = math.max(0.04, v * 1.4)
+end)
 createToggleFeature(settingsPage, nil, "Fast Attack Players", "Fast-attack nearby players alongside mobs", 14, FA.playerEnabled, function(state) FA.playerEnabled = state end)
 createToggleFeature(settingsPage, "AutoClickGunToggle", "Auto Click Gun", "Fire the gun like a real M1 click (virtual click + tool activation, aimed at the mob)", 14, true, function(state)
     FA.gunClickEnabled = state
@@ -11129,7 +11134,7 @@ resolveCombatRemotes(true)
 -- Có thể giảm/tăng tùy ping/server.
 -- 0.025 = tối đa khoảng 40 chu kỳ/giây về phía client,
 -- nhưng server vẫn có thể giới hạn tốc độ thực tế.
-local attackInterval = 0.12  -- khoảng 8 lượt/giây; giảm spam remote/giật màn hình khi dùng Melee hoặc Sword
+FA.interval = FA.interval or 0.05  -- ~20 lượt/giây (chỉnh trong Settings: Fast Attack Delay)
 local attackRadius   = 90    -- giữ tầm đánh hợp lý, giảm lượng mục tiêu phải quét
 local lastAttackTime = 0
 
@@ -11377,14 +11382,14 @@ end
 -- Remote bắn trực tiếp (RE/ShootGunEvent, RemoteFunctionShoot...) mặc định TẮT vì dễ bị server bỏ qua / làm súng
 -- vào trạng thái reload; muốn bật lại: FA.gunRemoteEnabled = true.
 FA.gunRemoteEnabled = false
-FA.gunClickInterval = 0.11
+FA.gunClickInterval = 0.07
 function FA.gunM1(tool, hrp, targets)
     if not FA.isGunTool(tool) then return false end
 
     local first = targets and targets[1]
     if not first or not first.hrp or not first.hrp.Parent then return false end
     if FA.gunClickEnabled == false then return false end
-    if os.clock() - (FA._gunAt or 0) < (FA.gunClickInterval or 0.11) then return true end   -- nhịp click; vẫn tính là đã bắn
+    if os.clock() - (FA._gunAt or 0) < (FA.gunClickInterval or 0.07) then return true end   -- nhịp click; vẫn tính là đã bắn
     FA._gunAt = os.clock()
 
     local pos = first.hrp.Position
@@ -11486,7 +11491,7 @@ local function performFastAttackV3()
     if not (FA.auto or FA.isFarming()) then return end
 
     local now = tick()
-    if now - lastAttackTime < attackInterval then return end
+    if now - lastAttackTime < FA.interval then return end
     lastAttackTime = now
 
     local char = LocalPlayer.Character
@@ -11694,7 +11699,7 @@ end)()
 -- Vòng lặp riêng giúp Fast Attack không phụ thuộc FPS của Heartbeat.
 _G.MHSpawn(function()
     while true do
-        task.wait(attackInterval)
+        task.wait(FA.interval)
         if fastAttackEnabled then
             pcall(performFastAttackV3)
         end
