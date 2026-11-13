@@ -3319,7 +3319,7 @@ local headerTitle = Instance.new("TextLabel")
 headerTitle.Size = UDim2.new(1, -90, 1, 0)
 headerTitle.Position = UDim2.new(0, 42, 0, 0)
 headerTitle.BackgroundTransparency = 1
-headerTitle.Text = "<font color=\"#EFC142\">Banana Cat Hub</font>  V2- Blox Fruit"
+headerTitle.Text = "<font color=\"#EFC142\">Minh Hub</font>  V2- Blox Fruit"
 headerTitle.RichText = true
 headerTitle.TextColor3 = Color3.fromRGB(235, 237, 245)
 headerTitle.TextSize = 14
