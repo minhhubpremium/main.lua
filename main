@@ -1434,11 +1434,26 @@ function Q.ThirdSeaPortals.remoteFallback(fromIsland, targetIsland, speed, activ
             if not src or not dst then return false end
             Q.ThirdSeaPortals.status = "Dự phòng: bay tới cổng " .. current .. " rồi requestEntrance → " .. nextIsland
             _G.MinhHubThirdSeaPortalStatus = Q.ThirdSeaPortals.status
+            -- Tải map quanh cổng trước (StreamingEnabled) rồi bay tới sát điểm cổng
+            _G.MHSpawn(function() pcall(function() LocalPlayer:RequestStreamAroundAsync(src.portal) end) end)
             if not Q.ThirdSeaPortals.tp3MoveRootTo(src.portal + Vector3.new(0, 2, 0), speed, active) then return false end
+            task.wait(0.6)
+            -- Thử lần lượt các toạ độ đích mà server chấp nhận cho requestEntrance của từng đảo
+            local destArgs = { dst.portal }
+            if nextIsland == "Hydra Island" then destArgs[#destArgs + 1] = Vector3.new(5661.5322265625, 1013.0907592773438, -334.9649963378906) end
+            if nextIsland == "Floating Turtle" then destArgs[#destArgs + 1] = Vector3.new(-12471.169921875, 374.94024658203, -7551.677734375) end
+            if nextIsland == "Castle on the Sea" then destArgs[#destArgs + 1] = Vector3.new(-5072.5, 314.5, -3151.2) end
             local arrived = false
-            for _ = 1, 4 do
+            for attempt = 1, 6 do
                 if active and not active() then return false end
-                pcall(function() commF:InvokeServer("requestEntrance", dst.portal) end)
+                local arg = destArgs[((attempt - 1) % #destArgs) + 1]
+                -- đứng sát điểm cổng trước mỗi lần gọi (server kiểm tra khoảng cách tới cổng)
+                local rr = Q.ThirdSeaPortals.tp3GetRoot(nil)
+                if rr and (rr.Position - src.portal).Magnitude > 25 then
+                    rr.CFrame = CFrame.new(src.portal + Vector3.new(0, 2, 0))
+                    rr.AssemblyLinearVelocity = Vector3.zero
+                end
+                pcall(function() commF:InvokeServer("requestEntrance", arg) end)
                 local t0 = tick()
                 while tick() - t0 < 2.5 do
                     local r = Q.ThirdSeaPortals.tp3GetRoot(nil)
@@ -2940,8 +2955,9 @@ local function claimQuestCore(questName, questLevel, mobName, questNpcPos)
 
     if (hrp.Position - questNpcPos).Magnitude > 30 then
         Q.qlog("Cần nhận quest mới -> bay tới NPC:", questName, questLevel)
-        flyTo(CFrame.new(questNpcPos + Vector3.new(0, 5, 0)))
-        if not autoFarmEnabled then return false end
+        -- Bay tới NPC quest có điều kiện dừng: tắt Auto Farm giữa chừng thì hủy ngay (trước đây vẫn bay hết quãng).
+        flyTo(CFrame.new(questNpcPos + Vector3.new(0, 5, 0)), nil, function() return autoFarmEnabled end)
+        if not autoFarmEnabled then stopAllFlying() return false end
         hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
         if not hrp then return false end
         if HasQuest() then Q.lastQuestSeen = tick(); return true end
@@ -3088,6 +3104,7 @@ screenGui.ResetOnSpawn = false
 screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 screenGui.DisplayOrder = 999999
 screenGui.Enabled = false  -- ẩn menu cho tới khi dựng xong giao diện (bật ở cuối file)
+_G.MinhHubUserHidden = false
 _G.MinhHubMenuGui = screenGui
 
 pcall(function()
@@ -3138,7 +3155,7 @@ task.delay(15, function()
     pcall(function()
         if screenGui and screenGui.Parent then
             screenGui.Enabled = true
-            if mainFrame then mainFrame.Visible = true end
+            if mainFrame and not _G.MinhHubUserHidden then mainFrame.Visible = true end
             if toggleBtn then toggleBtn.Visible = true end
         end
     end)
@@ -4590,6 +4607,14 @@ createToggleFeature(farmPage, "AutoFarmTargetToggle", "Auto Farm", "Automaticall
     autoFarmEnabled = state
     if not state and selectedFarmTarget == "Bones" and Q.BonesFarm then
         Q.BonesFarm.setStatus("Disabled")
+    end
+    if not state then
+        -- Tắt Auto Farm (Level / Bones / Cake Prince...): dừng NGAY mọi chuyến bay và mục tiêu đang dở,
+        -- không để script bay nốt tới đảo.
+        targetEnemy = nil
+        Q.flyingToGate = false
+        Q.flyingToExit = false
+        stopAllFlying()
     end
     if state then
         if toggleUpdateFuncs["AutoFarmMaterialToggle"] then toggleUpdateFuncs["AutoFarmMaterialToggle"](false) end
@@ -7949,7 +7974,7 @@ createInputFeature(settingsPage, "Fast Attack Targets", maxAttackTargets, 13, fu
     maxAttackTargets = math.clamp(math.floor(tonumber(val) or 2), 1, 6)
 end)
 createToggleFeature(settingsPage, nil, "Fast Attack Players", "Fast-attack nearby players alongside mobs", 14, FA.playerEnabled, function(state) FA.playerEnabled = state end)
-createToggleFeature(settingsPage, "AutoClickGunToggle", "Auto Click Gun", "Fire the gun via remote + tool activation (no screen click)", 14, true, function(state)
+createToggleFeature(settingsPage, "AutoClickGunToggle", "Auto Click Gun", "Fire the gun like a real M1 click (virtual click + tool activation, aimed at the mob)", 14, true, function(state)
     FA.gunClickEnabled = state
 end)
 createToggleFeature(settingsPage, nil, "Auto Fast Attack", "Enable Fast Attack while farming and attack targets in range automatically", 12, FA.auto, function(state)
@@ -8224,6 +8249,7 @@ end)
 local menuVisible, isMinimized = true, false
 local function toggleMenu()
     menuVisible = not menuVisible
+    _G.MinhHubUserHidden = not menuVisible   -- failsafe/safety không được tự bật lại menu khi người dùng đã tắt
     local scale = mainFrame:FindFirstChild("MenuScale")
     if not scale then
         mainFrame.Visible = menuVisible
@@ -8239,8 +8265,18 @@ local function toggleMenu()
         t.Completed:Connect(function()
             if not menuVisible then mainFrame.Visible = false end
         end)
+        -- Dự phòng: nếu sự kiện Completed không bắn (tween bị hủy), vẫn ẩn hẳn sau 0,25s
+        task.delay(0.25, function()
+            if not menuVisible then mainFrame.Visible = false end
+        end)
     end
 end
+-- Bất biến: menu đang ở trạng thái "tắt" thì không có đoạn nào được phép làm nó hiện lại.
+mainFrame:GetPropertyChangedSignal("Visible"):Connect(function()
+    if menuVisible == false and mainFrame.Visible then
+        mainFrame.Visible = false
+    end
+end)
 
 minimizeBtn.MouseButton1Click:Connect(function()
     isMinimized = not isMinimized
@@ -11257,78 +11293,90 @@ function FA.installGunAim()
     return FA._gunAimHook
 end
 
+-- Bắn súng GIỐNG CLICK M1 THẬT: mỗi nhịp (~0,11s) làm đúng chuỗi người chơi làm khi bấm chuột trái với súng:
+--   1) aim ảo: Mouse.Hit/Target trỏ vào quái (hook hookmetamethod) -> script gốc của súng ngắm đúng quái
+--   2) click chuột trái ảo (VirtualInputManager) tại vị trí quái trên màn hình
+--   3) tool:Activate()  (kích hoạt Tool.Activated như khi click)
+-- Remote bắn trực tiếp (RE/ShootGunEvent, RemoteFunctionShoot...) mặc định TẮT vì dễ bị server bỏ qua / làm súng
+-- vào trạng thái reload; muốn bật lại: FA.gunRemoteEnabled = true.
+FA.gunRemoteEnabled = false
+FA.gunClickInterval = 0.11
 function FA.gunM1(tool, hrp, targets)
     if not FA.isGunTool(tool) then return false end
 
     local first = targets and targets[1]
     if not first or not first.hrp or not first.hrp.Parent then return false end
-    if os.clock() - (FA._gunAt or 0) < 0.08 then return true end   -- chống spam, vẫn tính là đã bắn
+    if os.clock() - (FA._gunAt or 0) < (FA.gunClickInterval or 0.11) then return true end   -- nhịp click; vẫn tính là đã bắn
     FA._gunAt = os.clock()
 
     local pos = first.hrp.Position
-    local parts = {}
-    for i = 1, math.min(#targets, 6) do
-        if targets[i].hrp and targets[i].hrp.Parent then parts[#parts + 1] = targets[i].hrp end
+    local fired = false
+
+    -- 1) Aim ảo vào quái (giữ 0,45s để bao phủ cả thời gian xử lý Activated của súng)
+    local hookOk = FA.installGunAim()
+    if hookOk then
+        FA._aimPos, FA._aimPart, FA._aimUntil = pos, first.hrp, os.clock() + 0.45
     end
 
-    local fired = false
-    local netCount, toolCount = 0, 0
-
-    -- 1) Remote chung trong Modules.Net
-    for _, ev in ipairs(FA.findGunNetRemotes()) do
-        if ev.Parent then
-            if pcall(function() ev:FireServer(pos, parts) end) then fired = true; netCount = netCount + 1 end
-            pcall(function() ev:FireServer(pos, first.hrp) end)
+    -- 2) Click chuột trái ảo tại vị trí quái trên màn hình (không kéo con trỏ thật)
+    local clicked = false
+    if FA.gunClickEnabled ~= false and okVIM and VirtualInputManager then
+        local cam = workspace.CurrentCamera
+        if cam then
+            local v, onScreen = cam:WorldToViewportPoint(pos)
+            local vp = cam.ViewportSize
+            local x, y = vp.X / 2, vp.Y / 2
+            if onScreen and v.Z > 0 then x, y = v.X, v.Y end
+            local inset = 0
+            pcall(function() inset = game:GetService("GuiService"):GetGuiInset().Y end)
+            task.spawn(function()
+                pcall(function()
+                    VirtualInputManager:SendMouseButtonEvent(x, y + inset, 0, true, game, 0)
+                    task.wait(0.015)
+                    VirtualInputManager:SendMouseButtonEvent(x, y + inset, 0, false, game, 0)
+                end)
+            end)
+            clicked = true
         end
     end
 
-    -- 2) Remote nằm trong tool súng
-    for _, d in ipairs(tool:GetDescendants()) do
-        local n = string.lower(d.Name)
-        if string.find(n, "shoot", 1, true) or string.find(n, "fire", 1, true) or string.find(n, "gun", 1, true) then
-            if d:IsA("RemoteFunction") then
-                task.spawn(function()
-                    pcall(function() d:InvokeServer(pos, first.hrp) end)
-                end)
-                fired = true; toolCount = toolCount + 1
-            elseif d:IsA("RemoteEvent") then
-                if pcall(function() d:FireServer(pos, parts) end) then fired = true; toolCount = toolCount + 1 end
-                pcall(function() d:FireServer(pos, first.hrp) end)
+    -- 3) Kích hoạt tool như lúc click
+    local activated = pcall(function() tool:Activate() end)
+    fired = clicked or activated
+
+    -- 4) (tuỳ chọn) remote bắn trực tiếp
+    local netCount, toolCount = 0, 0
+    if FA.gunRemoteEnabled then
+        local parts = {}
+        for i = 1, math.min(#targets, 6) do
+            if targets[i].hrp and targets[i].hrp.Parent then parts[#parts + 1] = targets[i].hrp end
+        end
+        for _, ev in ipairs(FA.findGunNetRemotes()) do
+            if ev.Parent then
+                if pcall(function() ev:FireServer(pos, parts) end) then netCount = netCount + 1 end
             end
         end
+        for _, d in ipairs(tool:GetDescendants()) do
+            local n = string.lower(d.Name)
+            if string.find(n, "shoot", 1, true) or string.find(n, "fire", 1, true) or string.find(n, "gun", 1, true) then
+                if d:IsA("RemoteFunction") then
+                    task.spawn(function() pcall(function() d:InvokeServer(pos, first.hrp) end) end)
+                    toolCount = toolCount + 1
+                elseif d:IsA("RemoteEvent") then
+                    if pcall(function() d:FireServer(pos, parts) end) then toolCount = toolCount + 1 end
+                end
+            end
+        end
+        fired = fired or (netCount + toolCount > 0)
     end
-
-    -- 3) Bắn bằng chính script của súng (tool:Activate) + aim ảo về phía quái
-    --    -> đúng đường bắn thật của game (đủ tham số/ kiểm tra hợp lệ), không click màn hình.
-    local nativeFired = false
     FA._gunRemoteAt = (netCount + toolCount > 0) and os.clock() or FA._gunRemoteAt
-    -- FireServer/InvokeServer luôn "thành công" ở client dù server bỏ qua tham số sai, nên KHÔNG được coi là
-    -- đã bắn trúng. Luôn kích hoạt cả đường bắn gốc của súng (tool:Activate + aim ảo vào quái) theo nhịp ~0.25s.
-    do
-        local hookOk = FA.installGunAim()
-        if hookOk then
-            FA._aimPos, FA._aimPart, FA._aimUntil = pos, first.hrp, os.clock() + 0.5
-        end
-        if os.clock() - (FA._gunActAt or 0) >= 0.25 then
-            FA._gunActAt = os.clock()
-            nativeFired = pcall(function() tool:Activate() end)
-        end
-        if nativeFired then fired = true end
-    end
 
-    FA.gunLast = string.format("%s | net=%d tool=%d native=%s hook=%s fired=%s", tool.Name, netCount, toolCount, tostring(nativeFired), tostring(FA._gunAimHook), tostring(fired))
-    -- Chẩn đoán 1 lần cho mỗi súng
+    FA.gunLast = string.format("%s | click=%s activate=%s hook=%s remote=%d", tool.Name,
+        tostring(clicked), tostring(activated), tostring(FA._gunAimHook), netCount + toolCount)
     if not FA.gunDiag[tool.Name] then
         FA.gunDiag[tool.Name] = true
-        local kids = {}
-        for _, d in ipairs(tool:GetDescendants()) do
-            if d:IsA("RemoteEvent") or d:IsA("RemoteFunction") then kids[#kids + 1] = d.ClassName .. ":" .. d.Name end
-        end
-        local nets = {}
-        for _, ev in ipairs(FA.findGunNetRemotes()) do nets[#nets + 1] = ev.Name end
-        print(string.format("[MinhHub][Gun] %s | net remote: %s | remote trong tool: %s | aim ảo (hookmetamethod): %s | đã bắn: %s",
-            tool.Name, #nets > 0 and table.concat(nets, ", ") or "KHÔNG TÌM THẤY",
-            #kids > 0 and table.concat(kids, ", ") or "KHÔNG CÓ", tostring(FA._gunAimHook), tostring(fired)))
+        print(string.format("[MinhHub][Gun] %s | click M1 ảo: %s | Activate: %s | aim ảo (hookmetamethod): %s",
+            tool.Name, tostring(clicked), tostring(activated), tostring(FA._gunAimHook)))
     end
     return fired
 end
@@ -11338,22 +11386,9 @@ end
 -- Nếu executor không có hookmetamethod thì chỉ dùng tool:Activate() (cũng không di chuyển chuột).
 FA.gunClickEnabled = true
 function FA.gunClick(tool, targets)
+    -- gunM1 đã thực hiện đủ chuỗi click M1 (aim ảo + click ảo + Activate) theo nhịp riêng; chỉ gọi lại nó.
     if not FA.gunClickEnabled or not FA.isGunTool(tool) then return false end
-    if os.clock() - (FA._gunClickAt or 0) < 0.2 then return true end
-    local first = targets and targets[1]
-    if not first or not first.hrp or not first.hrp.Parent then return false end
-    FA._gunClickAt = os.clock()
-
-    -- aim ảo: Mouse.Hit/Target trỏ vào quái trong lúc click (không đụng tới con trỏ thật)
-    local aimOk = FA.installGunAim()
-    if aimOk then
-        FA._aimPos, FA._aimPart, FA._aimUntil = first.hrp.Position, first.hrp, os.clock() + 0.5
-    end
-
-    -- KHÔNG click màn hình (kiểu Banana): kích hoạt tool trực tiếp (tool:Activate) + aim ảo trỏ vào quái.
-    -- Con trỏ/HUD không bị chạm; remote bắn đã được FA.gunM1 gửi riêng ở mỗi nhịp.
-    local clicked = pcall(function() tool:Activate() end)
-    return clicked
+    return FA.gunM1(tool, nil, targets)
 end
 
 local function performFastAttackV3()
@@ -13504,6 +13539,11 @@ _G.MHSpawn(function()
                 and not autoChestEnabled and not Q.flyingToExit
                 and not (Q.SUB and Q.SUB.force)
                 and not RAID_FIXED.running then
+                -- flyTo (nhận quest, Chest...) dùng currentRaidTween, vòng này trước đây không hủy nó.
+                if currentRaidTween then
+                    pcall(function() currentRaidTween:Cancel() end)
+                    currentRaidTween = nil
+                end
                 targetEnemy = nil
                 if currentFlyTween then
                     pcall(function() currentFlyTween:Cancel() end)
@@ -14813,39 +14853,113 @@ function Q.FS.mode()
     return "⏸ Không farm gì (tất cả đang tắt)", Color3.fromRGB(170, 170, 180)
 end
 
+-- Tên quái "đang farm" theo từng chế độ (kể cả lúc chưa có mục tiêu cụ thể, đang bay tới khu quái).
+function Q.FS.expectedMob()
+    local ok, name = pcall(function()
+        if autoFarmMaterialEnabled then
+            return nil   -- Material: tên quái lấy từ mục tiêu thực tế bên dưới
+        end
+        if autoFarmEnabled then
+            local t = selectedFarmTarget
+            if t == "Auto Level" then
+                local _, _, mob = GetQuestData()
+                return mob
+            elseif t == "Bones" then
+                local _, _, mob = GetHauntedQuestData()
+                return mob
+            elseif t == "Cake Prince" then
+                if isCakePrinceReady then return "Cake Prince" end
+                local _, _, mob = Q.GetCakeQuestData()
+                return mob
+            elseif t == "Farm Boss" then
+                return selectedBossTarget ~= "" and selectedBossTarget or nil
+            end
+        end
+        return nil
+    end)
+    return ok and name or nil
+end
+
+function Q.FS.split(raw)
+    local base = string.gsub(tostring(raw), "%s*%[.-%]%s*$", "")
+    local lv = string.match(tostring(raw), "%[%s*[Ll][Vv]%.?%s*(%d+)%s*%]")
+    return base, lv
+end
+
+function Q.FS.esc(t)
+    return (tostring(t):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"))
+end
+
+-- Trả về (dòng quái đang farm, dòng thông tin phụ). Có RichText: tên quái in đậm màu nổi bật.
 function Q.FS.target()
-    local parts = {}
     local char = LocalPlayer.Character
     local root = char and char:FindFirstChild("HumanoidRootPart")
     local e = targetEnemy
-    if typeof(e) == "Instance" and e.Parent then
+    local expected = Q.FS.expectedMob()
+    local line2
+    local nearCount, sameName
+
+    if typeof(e) == "Instance" and e.Parent and e:FindFirstChildOfClass("Humanoid") then
         local hum = e:FindFirstChildOfClass("Humanoid")
-        local name = string.gsub(e.Name, "%s*%[.-%]%s*$", "")
-        local line = "Mục tiêu: " .. name
-        if hum and hum.MaxHealth > 0 then
-            line = line .. (" (%d%% máu)"):format(math.floor(hum.Health / hum.MaxHealth * 100 + 0.5))
+        local base, lv = Q.FS.split(e.Name)
+        sameName = base
+        line2 = "🎯 <b><font color=\"#FFD75E\">" .. Q.FS.esc(base) .. "</font></b>"
+        if lv then line2 = line2 .. " <font color=\"#9BB0C8\">[Lv." .. lv .. "]</font>" end
+        if hum.MaxHealth > 0 then
+            local pct = math.clamp(hum.Health / hum.MaxHealth, 0, 1)
+            local filled = math.floor(pct * 10 + 0.5)
+            local col = pct > 0.6 and "#5BE37D" or (pct > 0.3 and "#FFC857" or "#FF6B6B")
+            line2 = line2 .. "  <font color=\"" .. col .. "\">" .. string.rep("█", filled) .. string.rep("░", 10 - filled)
+                .. " " .. math.floor(pct * 100 + 0.5) .. "%</font>"
         end
         local er = e:FindFirstChild("HumanoidRootPart")
         if er and root then
-            line = line .. (" | cách %d studs"):format(math.floor((er.Position - root.Position).Magnitude))
+            line2 = line2 .. (" <font color=\"#9BB0C8\">· cách %d studs</font>"):format(math.floor((er.Position - root.Position).Magnitude))
         end
-        table.insert(parts, line)
+    elseif expected then
+        local base = Q.FS.split(expected)
+        sameName = base
+        line2 = "🧭 Đang tìm / bay tới khu: <b><font color=\"#FFD75E\">" .. Q.FS.esc(base) .. "</font></b>"
     elseif type(e) == "string" and e ~= "" then
-        table.insert(parts, "Đang bay tới: " .. e)
+        line2 = "🧭 Đang bay tới: <b>" .. Q.FS.esc(e) .. "</b>"
     else
-        table.insert(parts, "Target: none (searching for mobs / moving)")
+        line2 = "🔎 Chưa có mục tiêu (đang tìm quái / di chuyển)"
     end
-    table.insert(parts, "Lv." .. tostring(getLevel()))
+
+    -- Số quái cùng loại đang ở gần (trong 150 studs) -> biết đàn quái có được gom đủ không
+    if sameName and root then
+        local ef = workspace:FindFirstChild("Enemies")
+        if ef then
+            local n = 0
+            local lowBase = string.lower(sameName)
+            for _, m in ipairs(ef:GetChildren()) do
+                local mh = m:FindFirstChild("HumanoidRootPart")
+                local mhum = m:FindFirstChildOfClass("Humanoid")
+                if mh and mhum and mhum.Health > 0 and (mh.Position - root.Position).Magnitude <= 150
+                    and string.find(string.lower(m.Name), lowBase, 1, true) then
+                    n = n + 1
+                end
+            end
+            nearCount = n
+        end
+    end
+
+    local info = {}
+    if nearCount then info[#info + 1] = "Quanh bạn: " .. nearCount .. " con" end
+    if autoFarmEnabled and selectedFarmTarget ~= "Farm Boss" and Q.lastCur and Q.lastTotal then
+        info[#info + 1] = ("Quest %d/%d"):format(Q.lastCur, Q.lastTotal)
+    end
+    info[#info + 1] = "Lv." .. tostring(getLevel())
     local where
     if World3 and Q.submergedInside() then where = "Đảo dưới nước"
     elseif World1 then where = "Sea 1" elseif World2 then where = "Sea 2" else where = "Sea 3" end
-    table.insert(parts, where)
-    return table.concat(parts, " | ")
+    info[#info + 1] = where
+    return line2, table.concat(info, " | ")
 end
 
 function Q.FS.makeUI()
     local card = Instance.new("Frame")
-    card.Size = UDim2.new(1, 0, 0, 58)
+    card.Size = UDim2.new(1, 0, 0, 84)
     card.BackgroundColor3 = BANANA_CARD
     card.LayoutOrder = -1
     card.Parent = farmPage
@@ -14853,7 +14967,7 @@ function Q.FS.makeUI()
     addStroke(card, Color3.fromRGB(90, 225, 125), 1.2)
 
     local l1 = Instance.new("TextLabel")
-    l1.Size = UDim2.new(1, -24, 0, 30)
+    l1.Size = UDim2.new(1, -24, 0, 26)
     l1.Position = UDim2.new(0, 12, 0, 4)
     l1.BackgroundTransparency = 1
     l1.TextSize = 13
@@ -14865,31 +14979,48 @@ function Q.FS.makeUI()
     l1.Text = "Farming: ..."
     l1.Parent = card
 
+    -- Dòng tên quái đang farm (RichText: tên đậm, thanh máu, khoảng cách)
     local l2 = Instance.new("TextLabel")
-    l2.Size = UDim2.new(1, -24, 0, 20)
-    l2.Position = UDim2.new(0, 12, 0, 34)
+    l2.Size = UDim2.new(1, -24, 0, 24)
+    l2.Position = UDim2.new(0, 12, 0, 32)
     l2.BackgroundTransparency = 1
-    l2.TextSize = 11
-    l2.Font = Enum.Font.Gotham
+    l2.RichText = true
+    l2.TextSize = 12
+    l2.Font = Enum.Font.GothamMedium
     l2.TextXAlignment = Enum.TextXAlignment.Left
-    l2.TextWrapped = true
-    l2.TextColor3 = Color3.fromRGB(190, 190, 205)
+    l2.TextYAlignment = Enum.TextYAlignment.Center
+    l2.TextTruncate = Enum.TextTruncate.AtEnd
+    l2.TextColor3 = Color3.fromRGB(235, 235, 245)
     l2.Text = ""
     l2.Parent = card
 
-    Q.FS.l1, Q.FS.l2 = l1, l2
+    local l3 = Instance.new("TextLabel")
+    l3.Size = UDim2.new(1, -24, 0, 20)
+    l3.Position = UDim2.new(0, 12, 0, 58)
+    l3.BackgroundTransparency = 1
+    l3.TextSize = 11
+    l3.Font = Enum.Font.Gotham
+    l3.TextXAlignment = Enum.TextXAlignment.Left
+    l3.TextTruncate = Enum.TextTruncate.AtEnd
+    l3.TextColor3 = Color3.fromRGB(165, 175, 195)
+    l3.Text = ""
+    l3.Parent = card
+
+    Q.FS.l1, Q.FS.l2, Q.FS.l3 = l1, l2, l3
 end
 
 Q.FS.makeUI()
 _G.MHSpawn(function()
     while true do
-        task.wait(0.5)
+        task.wait(0.25)
         pcall(function()
             if not Q.FS.l1 then return end
             local text, color = Q.FS.mode()
             Q.FS.l1.Text = "Farming: " .. text
             Q.FS.l1.TextColor3 = color
-            Q.FS.l2.Text = Q.FS.target()
+            local mobLine, infoLine = Q.FS.target()
+            Q.FS.l2.Text = mobLine
+            Q.FS.l3.Text = infoLine
         end)
     end
 end)
@@ -16387,7 +16518,7 @@ task.defer(function()
             end
             screenGui.Enabled = true  -- bảo đảm menu được hiển thị sau khi toàn bộ script đã chạy đến cuối
         end
-        if mainFrame then mainFrame.Visible = true end
+        if mainFrame and not _G.MinhHubUserHidden then mainFrame.Visible = true end
         if toggleBtn then toggleBtn.Visible = true end
     end)
 end)
