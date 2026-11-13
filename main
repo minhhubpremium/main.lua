@@ -671,7 +671,7 @@ do
             {2475, "TikiQuest1",           2, "Island Boy",            V(-16547.75, 61.14, -173.41),    V(-16901.27, 84.07, -192.89)},
             {2500, "TikiQuest2",           1, "Sun-kissed Warrior",    V(-16539.08, 55.69, 1051.57),    V(-16349.84, 92.07, 1106.46)},
             {2525, "TikiQuest2",           2, "Isle Champio",          V(-16539.08, 55.69, 1051.57),    V(-16672.07, 21.79, 1123.28)}, 
-            {2550, "TikiQuest3",           2, "Serpent Hunter",       V(-16658.09, 110.27, 1579.21),    V(-16566.11, 107.05, 1329.61)},
+            {2550, "TikiQuest3",           1, "Serpent Hunter",       V(-16658.09, 110.27, 1579.21),    V(-16566.11, 107.05, 1329.61)},
             {2575, "TikiQuest3",           2, "Skull Slayer",         V(-16658.09, 110.27, 1579.21),    V(-16818.82, 71.27, 1635.02)},
 
             -- ================= SUBMERGED ISLAND =================
@@ -2904,14 +2904,84 @@ function Q.ResolveQuestNpc(questName, hardPos, mobName, questLevel)
     return usePosition(hardPos, "quest-data", false)
 end
 
+-- Đọc quái mà quest ĐANG HIỆN trên GUI đang nhắm tới. Trả về: true = đúng quái, false = quest khác quái cần farm, nil = không đọc được.
+function Q.activeQuestMatches(mobName)
+    if not mobName then return nil end
+    local mainGui = LocalPlayer.PlayerGui:FindFirstChild("Main")
+    local q = mainGui and mainGui:FindFirstChild("Quest")
+    if not q or not q.Visible then return nil end
+    local want = Q.normMob(mobName)
+    local sawDefeat = false
+    for _, d in ipairs(q:GetDescendants()) do
+        if d:IsA("TextLabel") and d.Text ~= "" and Q.isGuiShown(d) then
+            local t = string.lower(d.Text)
+            t = string.gsub(t, "possessed", "posessed")
+            if string.find(t, "defeat", 1, true) then
+                sawDefeat = true
+                -- chấp nhận số ít/nhiều ("Zombies") bằng cách so khớp tên bỏ chữ 's' cuối
+                local stem = string.gsub(want, "s$", "")
+                if string.find(t, want, 1, true) or string.find(t, stem, 1, true) then return true end
+            end
+        end
+    end
+    if sawDefeat then return false end
+    return nil
+end
+
+-- Bay tới NPC quest và đứng SÁT NPC (<= 22 studs). Thử lại tối đa 3 lần, lần cuối dịch thẳng khi đã ở gần.
+-- Trả về true nếu đã tới nơi; false nếu bị hủy (tắt Auto Farm) hoặc không tới được.
+function Q.approachQuestNpc(npcPos)
+    local function myHrp()
+        local c = LocalPlayer.Character
+        return c and c:FindFirstChild("HumanoidRootPart")
+    end
+    for attempt = 1, 3 do
+        local hrp = myHrp()
+        if not hrp then return false end
+        if (hrp.Position - npcPos).Magnitude <= 22 then return true end
+        flyTo(CFrame.new(npcPos + Vector3.new(0, 3, 0)), nil, function() return autoFarmEnabled end)
+        if not autoFarmEnabled then stopAllFlying() return false end
+        hrp = myHrp()
+        if not hrp then return false end
+        if (hrp.Position - npcPos).Magnitude <= 22 then return true end
+        if attempt == 3 and (hrp.Position - npcPos).Magnitude <= 150 then
+            pcall(function() hrp.CFrame = CFrame.new(npcPos + Vector3.new(0, 3, 0)) end)
+            task.wait(0.15)
+            return true
+        end
+        task.wait(0.2)
+    end
+    local hrp = myHrp()
+    return hrp ~= nil and (hrp.Position - npcPos).Magnitude <= 40
+end
+
 local function claimQuestCore(questName, questLevel, mobName, questNpcPos)
     if not questName then return true end
     local key = Q.makeQuestIdentity(questName, questLevel, mobName)
     questNpcPos = Q.ResolveQuestNpc(questName, questNpcPos, mobName, questLevel)
     Q.currentQuestMobName = mobName
 
-    -- 1) Đang có quest -> cứ đánh tiếp
+    -- 1) Đang có quest -> cứ đánh tiếp. NHƯNG nếu quest đang hiện là của quái KHÁC quái cần farm
+    -- (quest cũ còn sót / đổi level) thì hủy để nhận đúng quest của quái hiện tại.
     if HasQuest() then
+        local match = Q.activeQuestMatches(mobName)
+        if match == false and tick() - Q.questAcceptedAt > 8 then
+            Q.mismatchCount = (Q.mismatchCount or 0) + 1
+            if Q.mismatchCount >= 3 and tick() - (Q.lastAbandonAt or 0) > 15 then
+                Q.mismatchCount = 0
+                Q.lastAbandonAt = tick()
+                Q.qlog("Quest đang hiện KHÔNG phải của", tostring(mobName), "-> hủy quest cũ để nhận đúng quest")
+                local cf0 = getCommF()
+                if cf0 then pcall(function() cf0:InvokeServer("AbandonQuest") end) end
+                Q.lastQuestSeen = 0
+                Q.acceptedQuestKey = nil
+                Q.lastQuestAttempt = 0
+                task.wait(0.6)
+                return false
+            end
+        else
+            Q.mismatchCount = 0
+        end
         Q.lastQuestSeen = tick()
         if Q.acceptedQuestKey == nil then Q.acceptedQuestKey = key end
         Q.questAttempts = 0
@@ -2953,14 +3023,19 @@ local function claimQuestCore(questName, questLevel, mobName, questNpcPos)
     local commF = getCommF()
     if not commF then return true end
 
-    if (hrp.Position - questNpcPos).Magnitude > 30 then
+    if (hrp.Position - questNpcPos).Magnitude > 22 then
         Q.qlog("Cần nhận quest mới -> bay tới NPC:", questName, questLevel)
-        -- Bay tới NPC quest có điều kiện dừng: tắt Auto Farm giữa chừng thì hủy ngay (trước đây vẫn bay hết quãng).
-        flyTo(CFrame.new(questNpcPos + Vector3.new(0, 5, 0)), nil, function() return autoFarmEnabled end)
+        -- Bay tới NPC quest có điều kiện dừng: tắt Auto Farm giữa chừng thì hủy ngay.
+        local arrived = Q.approachQuestNpc(questNpcPos)
         if not autoFarmEnabled then stopAllFlying() return false end
         hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
         if not hrp then return false end
         if HasQuest() then Q.lastQuestSeen = tick(); return true end
+        if not arrived then
+            Q.qlog("Chưa tới sát NPC, thử lại:", math.floor((hrp.Position - questNpcPos).Magnitude), "studs")
+            return false
+        end
+        task.wait(0.25)   -- đứng yên 1 chút cho server cập nhật vị trí rồi mới gọi StartQuest
     end
 
     Q.lastQuestAttempt = tick()
@@ -3014,6 +3089,8 @@ local function claimQuestCore(questName, questLevel, mobName, questNpcPos)
     if Q.questAttempts >= 3 then
         Q.questAttempts = 0
         Q.questGiveUpUntil = tick() + 20
+        Q.npcLearned[key] = nil          -- vị trí NPC đang dùng có thể sai -> dò lại ở lần sau
+        Q.npcListAt = 0
         Q.qlog("Nhận quest thất bại 3 lần, bỏ qua 20s để farm")
         return true
     end
@@ -11306,6 +11383,7 @@ function FA.gunM1(tool, hrp, targets)
 
     local first = targets and targets[1]
     if not first or not first.hrp or not first.hrp.Parent then return false end
+    if FA.gunClickEnabled == false then return false end
     if os.clock() - (FA._gunAt or 0) < (FA.gunClickInterval or 0.11) then return true end   -- nhịp click; vẫn tính là đã bắn
     FA._gunAt = os.clock()
 
@@ -11318,30 +11396,40 @@ function FA.gunM1(tool, hrp, targets)
         FA._aimPos, FA._aimPart, FA._aimUntil = pos, first.hrp, os.clock() + 0.45
     end
 
-    -- 2) Click chuột trái ảo tại vị trí quái trên màn hình (không kéo con trỏ thật)
-    local clicked = false
-    if FA.gunClickEnabled ~= false and okVIM and VirtualInputManager then
+    -- 2) Click chuột trái ảo (input thật -> súng tự nhận Activated). Nếu quái ngoài màn hình thì quay camera nhìn vào quái.
+    local clicked, activated = false, false
+    if okVIM and VirtualInputManager then
         local cam = workspace.CurrentCamera
         if cam then
             local v, onScreen = cam:WorldToViewportPoint(pos)
+            if not (onScreen and v.Z > 0) then
+                pcall(function() cam.CFrame = CFrame.lookAt(cam.CFrame.Position, pos) end)
+                v, onScreen = cam:WorldToViewportPoint(pos)
+            end
             local vp = cam.ViewportSize
             local x, y = vp.X / 2, vp.Y / 2
-            if onScreen and v.Z > 0 then x, y = v.X, v.Y end
+            if onScreen and v.Z > 0 then
+                x = math.clamp(v.X, 5, vp.X - 5)
+                y = math.clamp(v.Y, 5, vp.Y - 5)
+            end
             local inset = 0
             pcall(function() inset = game:GetService("GuiService"):GetGuiInset().Y end)
+            local cx, cy = x, y + inset
             task.spawn(function()
                 pcall(function()
-                    VirtualInputManager:SendMouseButtonEvent(x, y + inset, 0, true, game, 0)
-                    task.wait(0.015)
-                    VirtualInputManager:SendMouseButtonEvent(x, y + inset, 0, false, game, 0)
+                    VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, true, game, 0)
+                    task.wait(0.02)
+                    VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, false, game, 0)
                 end)
             end)
             clicked = true
         end
     end
 
-    -- 3) Kích hoạt tool như lúc click
-    local activated = pcall(function() tool:Activate() end)
+    -- 3) Không có click ảo thì dùng tool:Activate() thay thế (tránh bắn đôi)
+    if not clicked then
+        activated = pcall(function() tool:Activate() end)
+    end
     fired = clicked or activated
 
     -- 4) (tuỳ chọn) remote bắn trực tiếp
