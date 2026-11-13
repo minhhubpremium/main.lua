@@ -3205,7 +3205,7 @@ do
     local bananaIcon = Instance.new("TextLabel")
     bananaIcon.Size = UDim2.new(1, 0, 1, 0)
     bananaIcon.BackgroundTransparency = 1
-    bananaIcon.Text = "🍌"
+    bananaIcon.Text = "M"
     bananaIcon.TextColor3 = BANANA_YELLOW
     bananaIcon.TextSize = 26
     bananaIcon.Font = Enum.Font.GothamBlack
@@ -3332,9 +3332,9 @@ headerBanana.Name = "BananaCatLogo"
 headerBanana.Size = UDim2.fromOffset(28, 26)
 headerBanana.Position = UDim2.fromOffset(6, 2)
 headerBanana.BackgroundTransparency = 1
-headerBanana.Text = "🍌"
+headerBanana.Text = "M"
 headerBanana.TextSize = 18
-headerBanana.Font = Enum.Font.GothamBold
+headerBanana.Font = Enum.Font.GothamBlack
 headerBanana.Parent = header
 
 function MH.winBtn(text, xOff, size)
@@ -3416,7 +3416,7 @@ do
     local logoText = Instance.new("TextLabel")
     logoText.Size = UDim2.new(1, 0, 1, 0)
     logoText.BackgroundTransparency = 1
-    logoText.Text = "🍌"
+    logoText.Text = "M"
     logoText.TextSize = 38
     logoText.Font = Enum.Font.GothamBlack
     logoText.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -3478,7 +3478,7 @@ local function createTab(tabName, iconText, isDefault)
 
     -- biểu tượng đơn sắc bên trái tên tab
     do
-        local iconMap = {Farm = "🍌", Boss = "♛", Raid = "☄", Gacha = "✦", Shop = "▣", Config = "⚙", ESP = "◉", Status = "▤"}
+        local iconMap = {Farm = "M", Boss = "♛", Raid = "☄", Gacha = "✦", Shop = "▣", Config = "⚙", ESP = "◉", Status = "▤"}
         local ic = Instance.new("TextLabel")
         ic.Size = UDim2.new(0, 22, 1, 0)
         ic.Position = UDim2.new(0, -26, 0, 0)
