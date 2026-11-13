@@ -7573,7 +7573,6 @@ local function updateSliderValue(inputX)
     farmDistanceHeight = val
     valueBox.Text = tostring(val)
     sliderFill.Size = UDim2.new(relativeX, 0, 1, 0)
-    if _G.MHRaidHeightUI then pcall(_G.MHRaidHeightUI, val) end   -- đồng bộ thanh trong tab Raid
 end
 
 -- Cho thanh trong tab Raid cập nhật hiển thị thanh này
@@ -7608,11 +7607,97 @@ valueBox.FocusLost:Connect(function()
         farmDistanceHeight = num
         valueBox.Text = tostring(num)
         sliderFill.Size = UDim2.new(num / 100, 0, 1, 0)
-        if _G.MHRaidHeightUI then pcall(_G.MHRaidHeightUI, num) end
     else
         valueBox.Text = tostring(farmDistanceHeight)
     end
 end)
+
+-- RAID HEIGHT SLIDER (ngay dưới thanh Farm Height): độ cao bay/đứng khi Farm Raid
+do
+    local raidCard = Instance.new("Frame")
+    raidCard.Size = UDim2.new(1, 0, 0, 56)
+    raidCard.BackgroundColor3 = BANANA_CARD
+    raidCard.LayoutOrder = 3
+    raidCard.Parent = settingsPage
+    addCorner(raidCard, 8)
+    addStroke(raidCard, BANANA_CARD_BORDER, 1.2)
+
+    local rTitle = Instance.new("TextLabel")
+    rTitle.Size = UDim2.new(0.65, 0, 0, 28)
+    rTitle.Position = UDim2.new(0, 12, 0, 4)
+    rTitle.BackgroundTransparency = 1
+    rTitle.Text = "Farm Raid Height (Flight Altitude)"
+    rTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+    rTitle.TextSize = 12
+    rTitle.Font = Enum.Font.GothamBold
+    rTitle.TextXAlignment = Enum.TextXAlignment.Left
+    rTitle.Parent = raidCard
+
+    local startVal = math.clamp(tonumber(RAID_FIXED and RAID_FIXED.lockHeight) or 35, 0, 100)
+
+    local rBox = Instance.new("TextBox")
+    rBox.Size = UDim2.new(0, 60, 0, 24)
+    rBox.Position = UDim2.new(1, -70, 0, 6)
+    rBox.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+    rBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+    rBox.TextSize = 12
+    rBox.Font = Enum.Font.GothamBold
+    rBox.Text = tostring(startVal)
+    rBox.ClearTextOnFocus = false
+    rBox.Parent = raidCard
+    addCorner(rBox, 6)
+
+    local rTrack = Instance.new("TextButton")
+    rTrack.Size = UDim2.new(1, -24, 0, 8)
+    rTrack.Position = UDim2.new(0, 12, 1, -14)
+    rTrack.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+    rTrack.BorderSizePixel = 0
+    rTrack.Text = ""
+    rTrack.AutoButtonColor = false
+    rTrack.Parent = raidCard
+    addCorner(rTrack, 4)
+
+    local rFill = Instance.new("Frame")
+    rFill.Size = UDim2.new(startVal / 100, 0, 1, 0)
+    rFill.BackgroundColor3 = BANANA_YELLOW
+    rFill.BorderSizePixel = 0
+    rFill.Parent = rTrack
+    addCorner(rFill, 4)
+
+    local function apply(v)
+        v = math.clamp(math.floor(v), 0, 100)
+        if RAID_FIXED then RAID_FIXED.lockHeight = v end
+        rBox.Text = tostring(v)
+        rFill.Size = UDim2.new(v / 100, 0, 1, 0)
+    end
+
+    local dragging = false
+    local function fromX(x)
+        local w = rTrack.AbsoluteSize.X
+        if w <= 0 then return end
+        apply(math.clamp((x - rTrack.AbsolutePosition.X) / w, 0, 1) * 100)
+    end
+    rTrack.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            fromX(input.Position.X)
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            fromX(input.Position.X)
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+    rBox.FocusLost:Connect(function()
+        local n = tonumber(rBox.Text)
+        if n then apply(n) else rBox.Text = tostring(RAID_FIXED and RAID_FIXED.lockHeight or 35) end
+    end)
+end
 
 createToggleFeature(settingsPage, nil, "Bring Mob", "Gather nearby mobs into one location", 16, bringMobsEnabled, function(state) 
     bringMobsEnabled = state 
@@ -8044,7 +8129,7 @@ end
 createToggleFeature(settingsPage, nil, "Auto Race V3", "Automatically use the Race V3 skill (T key)", 23, autoRaceV3Enabled, function(state) autoRaceV3Enabled = state end)
 createToggleFeature(settingsPage, nil, "Auto Race V4", "Automatically activate Race V4 awakening (Y key)", 24, autoRaceV4Enabled, function(state) autoRaceV4Enabled = state end)
 createToggleFeature(settingsPage, nil, "Anti AFK", "Prevent AFK disconnections automatically", 32, autoAfkEnabled, function(state) autoAfkEnabled = state end)
-createInputFeature(settingsPage, "Fly Speed (60-350)", flySpeed, 3, function(val)
+createInputFeature(settingsPage, "Fly Speed (60-350)", flySpeed, 5, function(val)
     flySpeed = math.clamp(math.floor(tonumber(val) or 190), 60, 350)
 end)
 createInputFeature(settingsPage, "Fast Attack Targets", maxAttackTargets, 13, function(val)
