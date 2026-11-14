@@ -2062,11 +2062,20 @@ function Q.ThirdSeaPortals.execute(initialRoot, goalCF, speed, active, plan)
 
         local deadline = tick() + 15
         local arrivedIsland
+        local retouches, lastTouchAt = 0, tick()
         while tick() < deadline do
             if active and not active() then return false end
             local r = Q.ThirdSeaPortals.tp3GetRoot(initialRoot)
             if not r then return false end
             local nowIsland = Q.ThirdSeaPortals.classify(r.Position)
+            -- Chạm 1 lần có thể không đủ (server chưa nhận / lệch vùng kích hoạt): chạm lại mỗi 2s, tối đa 4 lần.
+            if nowIsland == hop.from and retouches < 4 and tick() - lastTouchAt >= 2 then
+                retouches = retouches + 1
+                lastTouchAt = tick()
+                Q.ThirdSeaPortals.status = "Portal chưa phản hồi - chạm lại lần " .. retouches
+                _G.MinhHubThirdSeaPortalStatus = Q.ThirdSeaPortals.status
+                pcall(Q.ThirdSeaPortals.tp3TouchPortal, portal, standPos)
+            end
             if nowIsland == hop.target then
                 arrivedIsland = nowIsland
                 break
@@ -2075,6 +2084,20 @@ function Q.ThirdSeaPortals.execute(initialRoot, goalCF, speed, active, plan)
                 break -- Server moved us to an unexpected hub; never continue a stale route.
             end
             task.wait(0.12)
+        end
+
+        if arrivedIsland ~= hop.target then
+            -- Dự phòng cuối: gọi remote requestEntrance của game (giống bấm cổng) rồi chờ thêm 6s.
+            Q.ThirdSeaPortals.status = "Chạm cổng không qua được - thử remote requestEntrance"
+            _G.MinhHubThirdSeaPortalStatus = Q.ThirdSeaPortals.status
+            pcall(function() Q.ThirdSeaPortals.remoteFallback(hop.from, hop.target, speed, active) end)
+            local t2 = tick() + 6
+            while tick() < t2 do
+                if active and not active() then return false end
+                local r2 = Q.ThirdSeaPortals.tp3GetRoot(initialRoot)
+                if r2 and Q.ThirdSeaPortals.classify(r2.Position) == hop.target then arrivedIsland = hop.target break end
+                task.wait(0.15)
+            end
         end
 
         if arrivedIsland ~= hop.target then
@@ -2965,11 +2988,21 @@ local function claimQuestCore(questName, questLevel, mobName, questNpcPos)
     -- (quest cũ còn sót / đổi level) thì hủy để nhận đúng quest của quái hiện tại.
     if HasQuest() then
         local match = Q.activeQuestMatches(mobName)
+        -- KHÔNG hủy quest Elite Hunter (và các luồng quest riêng) - trước đây gây vòng lặp Abandon/nhận lại.
+        local otherQuest = _G.EliteHunter == true or _G.EliteBusy == true
+        if not otherQuest then
+            local okE, eq = pcall(function() return EH.questState() end)
+            otherQuest = okE and eq == true
+        end
+        -- Mỗi quest chỉ hủy tối đa 2 lần để chắc chắn không lặp vô hạn.
+        Q.abandonCount = Q.abandonCount or {}
+        if otherQuest or (Q.abandonCount[key] or 0) >= 2 then match = true end
         if match == false and tick() - Q.questAcceptedAt > 8 then
             Q.mismatchCount = (Q.mismatchCount or 0) + 1
             if Q.mismatchCount >= 3 and tick() - (Q.lastAbandonAt or 0) > 15 then
                 Q.mismatchCount = 0
                 Q.lastAbandonAt = tick()
+                Q.abandonCount[key] = (Q.abandonCount[key] or 0) + 1
                 Q.qlog("Quest đang hiện KHÔNG phải của", tostring(mobName), "-> hủy quest cũ để nhận đúng quest")
                 local cf0 = getCommF()
                 if cf0 then pcall(function() cf0:InvokeServer("AbandonQuest") end) end
@@ -5377,6 +5410,7 @@ Q.SmartController.priorities = {
     raid = 90,
     fruit = 80,
     pirate = 75,
+    racev2 = 66,
     elite = 64,
     tyrant = 63,
     material = 52,
@@ -5388,6 +5422,7 @@ Q.SmartController.labels = {
     raid = "Raid / Start Raid / mua chip",
     fruit = "Nhặt hoặc xử lý trái",
     pirate = "Pirate Raid",
+    racev2 = "Nâng Race V2",
     elite = "Elite Hunter",
     tyrant = "Tyrant of the Skies",
     material = "Farm nguyên liệu",
@@ -5411,6 +5446,8 @@ function Q.SmartController.resolveSmartTask()
         name = "fruit"
     elseif _G.PirateRaidBusy == true then
         name = "pirate"
+    elseif _G.RaceV2Busy == true then
+        name = "racev2"
     elseif _G.EliteBusy == true then
         name = "elite"
     elseif _G.TyrantFarm == true or _G.TyrantSummon == true then
@@ -7210,6 +7247,52 @@ createToggleFeature(gachaPage, "AutoPickupFruitToggle", "Auto Collect Fruit", "P
     end
 end)
 
+createToggleFeature(gachaPage, "NaturalFruitOnlyToggle", "Only Teleport Natural Fruit", "Auto Collect Fruit only flies to fruits that spawned naturally on the map (skips fruits dropped by players)", 6, false, function(state)
+    _G.NaturalFruitOnly = state
+end)
+
+createToggleFeature(gachaPage, "DropFruitWhenFullToggle", "Drop Fruit at Position When Full", "When fruit storage is full, fly to the saved drop position and drop the fruit there (set the position with the button below)", 7, false, function(state)
+    _G.DropFruitWhenFull = state
+end)
+
+;(function()
+    local card = Instance.new("Frame")
+    card.Size = UDim2.new(1, 0, 0, 38)
+    card.BackgroundColor3 = BANANA_CARD
+    card.LayoutOrder = 8
+    card.Parent = gachaPage
+    addCorner(card, 6)
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(0.6, 0, 1, 0)
+    lbl.Position = UDim2.new(0, 12, 0, 0)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = "Drop position: not set"
+    lbl.TextColor3 = Color3.fromRGB(255, 255, 255)
+    lbl.TextSize = 12
+    lbl.Font = Enum.Font.GothamMedium
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Parent = card
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0, 120, 0, 26)
+    btn.Position = UDim2.new(1, -130, 0.5, -13)
+    btn.BackgroundColor3 = BANANA_YELLOW
+    btn.TextColor3 = BANANA_TEXT_ON
+    btn.TextSize = 12
+    btn.Font = Enum.Font.GothamBold
+    btn.Text = "Set Here"
+    btn.AutoButtonColor = true
+    btn.Parent = card
+    addCorner(btn, 6)
+    btn.MouseButton1Click:Connect(function()
+        local c = LocalPlayer.Character
+        local r = c and c:FindFirstChild("HumanoidRootPart")
+        if r then
+            _G.DropFruitPos = r.Position
+            lbl.Text = string.format("Drop position: %d, %d, %d", r.Position.X, r.Position.Y, r.Position.Z)
+        end
+    end)
+end)()
+
 createToggleFeature(gachaPage, "AutoRandomFruitToggle", "Auto Buy Random Fruit", "Try purchasing remotely; if rejected, fly to Zioles and buy. Limited to once every 2 hours; Lv. 50+ required. Use with Auto Store Fruit", 4, autoRandomFruitEnabled, function(state)
     autoRandomFruitEnabled = state
     if not state then _G.FruitPickupBusy = false end
@@ -8225,6 +8308,10 @@ end
 createToggleFeature(settingsPage, nil, "Auto Race V3", "Automatically use the Race V3 skill (T key)", 23, autoRaceV3Enabled, function(state) autoRaceV3Enabled = state end)
 createToggleFeature(settingsPage, nil, "Auto Race V4", "Automatically activate Race V4 awakening (Y key)", 24, autoRaceV4Enabled, function(state) autoRaceV4Enabled = state end)
 createToggleFeature(settingsPage, nil, "Anti AFK", "Prevent AFK disconnections automatically", 32, autoAfkEnabled, function(state) autoAfkEnabled = state end)
+createToggleFeature(settingsPage, "AutoRaceV2Toggle", "Auto Upgrade Race V2 (Experimental)", "Sea 2, Lv 850+: Alchemist quest -> collect 3 flowers -> Wenlocktoad. Logs steps to console [RaceV2]", 33, false, function(state)
+    _G.AutoRaceV2 = state
+end)
+createToggleFeature(settingsPage, "AutoRejoinToggle", "Auto Rejoin", "Automatically rejoin the server when disconnected / kicked / error prompt appears", 32, true, function(state) _G.AutoRejoin = state end)
 createInputFeature(settingsPage, "Fly Speed (60-350)", flySpeed, 5, function(val)
     flySpeed = math.clamp(math.floor(tonumber(val) or 190), 60, 350)
 end)
@@ -8538,6 +8625,13 @@ end
 mainFrame:GetPropertyChangedSignal("Visible"):Connect(function()
     if menuVisible == false and mainFrame.Visible then
         mainFrame.Visible = false
+    end
+end)
+
+-- Phím HOME bật/tắt menu (bỏ qua khi đang gõ trong ô nhập)
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if input.KeyCode == Enum.KeyCode.Home and not UserInputService:GetFocusedTextBox() then
+        pcall(toggleMenu)
     end
 end)
 
@@ -9930,6 +10024,33 @@ _G.MHSpawn(function()
             or (ch ~= nil and ch:FindFirstChild(name) ~= nil)
     end
 
+    -- Phân loại trái TỰ NHIÊN vs trái người chơi thả: lúc trái xuất hiện mà có người chơi (kể cả mình) đứng trong 45 studs
+    -- thì coi là trái bị thả (không phải spawn tự nhiên).
+    Q.fruitNatural = Q.fruitNatural or setmetatable({}, {__mode = "k"})
+    local function classifyFruit(obj)
+        if Q.fruitNatural[obj] ~= nil then return end
+        local handle = obj:FindFirstChild("Handle") or obj:WaitForChild("Handle", 2)
+        local pos = handle and handle:IsA("BasePart") and handle.Position
+        if not pos then return end
+        local natural = true
+        for _, pl in ipairs(Players:GetPlayers()) do
+            local r = pl.Character and pl.Character:FindFirstChild("HumanoidRootPart")
+            if r and (r.Position - pos).Magnitude <= 45 then natural = false break end
+        end
+        Q.fruitNatural[obj] = natural
+    end
+    for _, o in ipairs(workspace:GetChildren()) do
+        if (o:IsA("Tool") or o:IsA("Model")) and string.find(string.lower(o.Name), "fruit", 1, true) then
+            task.spawn(function() pcall(classifyFruit, o) end)
+        end
+    end
+    workspace.ChildAdded:Connect(function(o)
+        if (o:IsA("Tool") or o:IsA("Model")) and string.find(string.lower(o.Name), "fruit", 1, true)
+            and not Players:GetPlayerFromCharacter(o) then
+            task.spawn(function() pcall(classifyFruit, o) end)
+        end
+    end)
+
     -- Trái gần nhất còn nhặt được
     local function findNearestFruit(hrp)
         local bestObj, bestHandle, bestDist
@@ -9941,8 +10062,11 @@ _G.MHSpawn(function()
                 and not Players:GetPlayerFromCharacter(obj) then
 
                 local ban = blacklist[obj]
-                if not (ban and tick() < ban) and not alreadyHolding(obj.Name) then
+                local skipNatural = _G.NaturalFruitOnly and Q.fruitNatural[obj] == false
+                if not (ban and tick() < ban) and not skipNatural and not alreadyHolding(obj.Name) then
                     local handle = obj:FindFirstChild("Handle")
+                    -- không nhặt lại trái do chính mình thả ở vị trí Drop
+                    if handle and _G.DropFruitPos and (handle.Position - _G.DropFruitPos).Magnitude <= 60 then handle = nil end
                     if handle and handle:IsA("BasePart") then
                         local d = (handle.Position - hrp.Position).Magnitude
                         if d <= maxDist and (not bestDist or d < bestDist) then
@@ -10519,6 +10643,174 @@ _G.MHSpawn(function()
     end
 end)
 
+
+-- =========================================================
+-- AUTO REJOIN: tự vào lại server khi bị disconnect / kick / hiện bảng lỗi
+-- =========================================================
+_G.AutoRejoin = true
+Q.Rejoin = { busy = false, lastAt = 0 }
+function Q.Rejoin.go(reason)
+    if not _G.AutoRejoin or Q.Rejoin.busy then return end
+    Q.Rejoin.busy = true
+    print("[AutoRejoin] Lý do:", tostring(reason), "-> rejoin sau 2s")
+    task.wait(2)
+    local TS = game:GetService("TeleportService")
+    local ok, err = pcall(function()
+        if #Players:GetPlayers() <= 1 then
+            -- server trống: Teleport về place để vào server mới
+            TS:Teleport(game.PlaceId, LocalPlayer)
+        else
+            TS:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+        end
+    end)
+    if not ok then
+        print("[AutoRejoin] Teleport lỗi:", tostring(err), "-> thử Teleport thường")
+        pcall(function() TS:Teleport(game.PlaceId, LocalPlayer) end)
+    end
+    task.wait(10)           -- nếu vẫn còn ở đây sau 10s thì cho phép thử lại
+    Q.Rejoin.busy = false
+end
+
+_G.MHSpawn(function()
+    local GS = game:GetService("GuiService")
+    pcall(function()
+        GS.ErrorMessageChanged:Connect(function(msg)
+            if msg and msg ~= "" then _G.MHSpawn(Q.Rejoin.go, "ErrorMessage: " .. tostring(msg)) end
+        end)
+    end)
+    pcall(function()
+        game:GetService("TeleportService").TeleportInitFailed:Connect(function(_, result, msg)
+            _G.MHSpawn(Q.Rejoin.go, "TeleportInitFailed: " .. tostring(result) .. " " .. tostring(msg))
+        end)
+    end)
+    -- Bảng lỗi "Disconnected" của Roblox (CoreGui.RobloxPromptGui.promptOverlay.ErrorPrompt)
+    local okCore, core = pcall(function() return game:GetService("CoreGui") end)
+    if okCore and core then
+        local prompt = core:WaitForChild("RobloxPromptGui", 30)
+        local overlay = prompt and prompt:WaitForChild("promptOverlay", 30)
+        if overlay then
+            overlay.ChildAdded:Connect(function(c)
+                if c.Name == "ErrorPrompt" then _G.MHSpawn(Q.Rejoin.go, "ErrorPrompt") end
+            end)
+            if overlay:FindFirstChild("ErrorPrompt") then _G.MHSpawn(Q.Rejoin.go, "ErrorPrompt (đã hiện)") end
+        end
+    end
+end)
+
+-- =========================================================
+-- AUTO UP RACE V2 (thử nghiệm): Alchemist -> 3 bông hoa -> Wenlocktoad
+-- Remote theo mô tả phổ biến của game; chưa kiểm chứng được ngoài game, mọi bước đều in log [RaceV2].
+-- =========================================================
+Q.RV2 = { status = "Disabled", flowerTry = {} }
+function Q.RV2.log(...)
+    local t = table.concat({...}, " ")
+    if Q.RV2.status ~= t then Q.RV2.status = t; print("[RaceV2]", t) end
+end
+function Q.RV2.hasV2()
+    local ok, v = pcall(function()
+        local d = LocalPlayer:FindFirstChild("Data")
+        local r = d and d:FindFirstChild("Race")
+        return r and r:FindFirstChild("Evolved") ~= nil
+    end)
+    return ok and v == true
+end
+function Q.RV2.flowerTool(i)
+    local want = ({"blue flower", "red flower", "yellow flower"})[i]
+    for _, c in ipairs({LocalPlayer:FindFirstChild("Backpack"), LocalPlayer.Character}) do
+        if c then
+            for _, t in ipairs(c:GetChildren()) do
+                if t:IsA("Tool") and string.lower(t.Name) == want then return true end
+            end
+        end
+    end
+    return false
+end
+function Q.RV2.goTo(pos)
+    local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false end
+    if (hrp.Position - pos).Magnitude > 15 then
+        flyTo(CFrame.new(pos + Vector3.new(0, 4, 0)), nil, function() return _G.AutoRaceV2 end)
+    end
+    return _G.AutoRaceV2
+end
+function Q.RV2.npcPos(keyword)
+    for _, c in ipairs(Q.questNpcCandidates(true)) do
+        if string.find(string.lower(c.name), keyword, 1, true) then return c.pos end
+    end
+    return nil
+end
+_G.MHSpawn(function()
+    while task.wait(1.5) do
+        if not _G.AutoRaceV2 then _G.RaceV2Busy = false end
+        if _G.AutoRaceV2 then
+            local okRV, errRV = pcall(function()
+                if not World2 then Q.RV2.log("Cần ở Sea 2") return end
+                if getLevel() < 850 then Q.RV2.log("Cần Lv 850+") return end
+                if Q.RV2.hasV2() then Q.RV2.log("Đã có Race V2 - xong") _G.AutoRaceV2 = false _G.RaceV2Busy = false return end
+                if not Q.SmartController.canRun("racev2") then Q.RV2.log("Tạm dừng (chức năng khác đang chạy)") return end
+                local commF = getCommF()
+                if not commF then return end
+                _G.RaceV2Busy = true   -- chiếm quyền điều khiển khi đang đi nhận quest / nhặt hoa / nộp
+
+                local have = {Q.RV2.flowerTool(1), Q.RV2.flowerTool(2), Q.RV2.flowerTool(3)}
+                local alchemist = Q.RV2.npcPos("alchemist")
+
+                if not (have[1] and have[2] and have[3]) then
+                    -- nhận quest (gọi lặp lại an toàn)
+                    if alchemist and not Q.RV2.started then
+                        Q.RV2.log("Bay tới Alchemist nhận quest")
+                        if not Q.RV2.goTo(alchemist) then return end
+                        local r1 = commF:InvokeServer("Alchemist", "1")
+                        local r2 = commF:InvokeServer("Alchemist", "2")
+                        print("[RaceV2] Alchemist 1/2 ->", tostring(r1), tostring(r2))
+                        Q.RV2.started = true
+                    end
+                    -- thu thập hoa còn thiếu: Flower1/2/3 xuất hiện trong workspace (chạm vào để nhặt)
+                    for i = 1, 3 do
+                        if not have[i] then
+                            local f = workspace:FindFirstChild("Flower" .. i)
+                            local part = f and (f:IsA("BasePart") and f or f:FindFirstChildWhichIsA("BasePart", true))
+                            if part then
+                                Q.RV2.log("Nhặt Flower" .. i)
+                                if Q.RV2.goTo(part.Position) then
+                                    local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                                    if hrp then
+                                        pcall(function() hrp.CFrame = part.CFrame end)
+                                        if typeof(firetouchinterest) == "function" then
+                                            pcall(function() firetouchinterest(hrp, part, 0); firetouchinterest(hrp, part, 1) end)
+                                        end
+                                    end
+                                end
+                                return
+                            end
+                        end
+                    end
+                    _G.RaceV2Busy = false   -- đang chờ hoa -> nhả quyền để Auto Farm chạy bình thường
+                    Q.RV2.log("Chờ hoa: " .. (have[1] and "" or "Blue(đêm) ") .. (have[2] and "" or "Red(Swan Pirate) ") .. (have[3] and "" or "Yellow(Zombie) ") .. "- hãy bật Auto Farm quái tương ứng")
+                    return
+                end
+
+                -- đủ 3 hoa: nộp cho Alchemist rồi uống thuốc ở Wenlocktoad
+                if alchemist then
+                    Q.RV2.log("Đủ hoa -> nộp Alchemist")
+                    if not Q.RV2.goTo(alchemist) then return end
+                    print("[RaceV2] Alchemist 3 ->", tostring(commF:InvokeServer("Alchemist", "3")))
+                end
+                local wen = Q.RV2.npcPos("wenlocktoad")
+                if wen then
+                    Q.RV2.log("Tới Wenlocktoad")
+                    if not Q.RV2.goTo(wen) then return end
+                    print("[RaceV2] Wenlocktoad 1 ->", tostring(commF:InvokeServer("Wenlocktoad", "1")))
+                    print("[RaceV2] Wenlocktoad 2 ->", tostring(commF:InvokeServer("Wenlocktoad", "2")))
+                else
+                    Q.RV2.log("Không thấy NPC Wenlocktoad")
+                end
+            end)
+            if not okRV then _G.RaceV2Busy = false; print("[RaceV2] lỗi:", tostring(errRV)) end
+        end
+    end
+end)
+
 -- LOGIC AUTO STORE FRUIT v3: quét thông minh, chống spam, không cần equip trái
 _G.StoreFruitStatus = "Disabled"
 _G.MHSpawn(function()
@@ -10562,6 +10854,42 @@ _G.MHSpawn(function()
         add(tool.Name)
         add((tool.Name:gsub(" Fruit$", "")))
         return names
+    end
+
+    -- Kho đầy -> bay tới vị trí đã lưu và thả trái xuống đó
+    local function dropFruitAtPos(commF, tool)
+        local pos = _G.DropFruitPos
+        if not pos or not stillOwned(tool) then return false end
+        local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if not hum then return false end
+        _G.FruitPickupBusy = true
+        local dropped = false
+        local okAll, errAll = pcall(function()
+            setStatus("📦 Kho đầy -> bay tới vị trí thả trái: " .. tool.Name)
+            flyTo(CFrame.new(pos + Vector3.new(0, 3, 0)), 300, function() return autoStoreFruitEnabled and _G.DropFruitWhenFull end)
+            task.wait(0.3)
+            pcall(function() hum:EquipTool(tool) end)
+            task.wait(0.4)
+            local names = getFruitNames(tool)
+            local attempts = {}
+            for _, n in ipairs(names) do
+                attempts[#attempts + 1] = {"DropFruit", n}
+                attempts[#attempts + 1] = {"DropFruit", n, tool}
+            end
+            attempts[#attempts + 1] = {"DropFruit"}
+            for _, args in ipairs(attempts) do
+                if not stillOwned(tool) then dropped = true break end
+                local ok, r = pcall(function() return commF:InvokeServer(table.unpack(args)) end)
+                print("[DropFruit]", table.concat({tostring(args[1]), tostring(args[2])}, " "), "->", ok, tostring(r))
+                local deadline = tick() + 0.7
+                repeat task.wait(0.1) until not stillOwned(tool) or tick() >= deadline
+                if not stillOwned(tool) then dropped = true break end
+            end
+        end)
+        _G.FruitPickupBusy = false
+        if not okAll then print("[DropFruit] lỗi:", tostring(errAll)) end
+        setStatus(dropped and ("✅ Đã thả trái tại vị trí: " .. tool.Name) or ("⚠️ Chưa thả được " .. tool.Name .. " (xem console [DropFruit])"))
+        return dropped
     end
 
     local function storeTool(commF, tool)
@@ -10615,6 +10943,14 @@ _G.MHSpawn(function()
             local tries = failCount[tool]
             local delay = math.min(60, 5 * (2 ^ math.min(tries - 1, 3)))
             retryAt[tool] = tick() + delay
+            local lowRes = string.lower(lastResult)
+            local looksFull = string.find(lowRes, "full", 1, true) or string.find(lowRes, "limit", 1, true)
+                or string.find(lowRes, "max", 1, true) or string.find(lowRes, "space", 1, true) or string.find(lowRes, "enough", 1, true)
+            if _G.DropFruitWhenFull and _G.DropFruitPos and (looksFull or tries >= 2) then
+                inFlight[tool] = nil
+                if dropFruitAtPos(commF, tool) then failCount[tool] = nil; retryAt[tool] = nil end
+                return
+            end
             setStatus("⚠️ Chưa xác nhận cất được " .. tool.Name .. " — phản hồi: " .. lastResult .. "; thử lại sau " .. delay .. " giây")
         end
         inFlight[tool] = nil
